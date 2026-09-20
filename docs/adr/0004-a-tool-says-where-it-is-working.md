@@ -25,6 +25,12 @@ The hook prints nothing. Anything a `UserPromptSubmit` hook writes to standard
 output is handed to the model as context, and a time tracker has no business
 there.
 
+The note does two more things while it is fresh. It keeps the person present:
+a session working for ten minutes with nobody typing is not a break, it is
+being read. And once nobody has typed for `idleSeconds`, the note's repository
+decides the class outright, whatever window was left in front. A lock ends
+both, so a tool that keeps working behind a locked screen is not counted.
+
 Any other tool can leave the same note with `zyt context <source> <dir>`.
 
 ## What was rejected

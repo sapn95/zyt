@@ -11,7 +11,7 @@ run.
 | `labels` | `{"work":"W","private":"P","away":"·"}` | What the menu-bar item shows; a pinned class is shown in brackets |
 | `tickSeconds` | `30` | How often the screen is looked at; a switch to another application is looked at at once. Applied on **Reload the rules** |
 | `idleSeconds` | `600` | No input for this long ends the segment, backdated to the last input ([ADR 0005](adr/0005-away-starts-at-the-last-input.md)) |
-| `signalSeconds` | `300` | How long a coding tool's note counts ([ADR 0004](adr/0004-a-tool-says-where-it-is-working.md)) |
+| `signalSeconds` | `300` | How long a coding tool's note counts: as presence, and as the class once nobody types ([ADR 0004](adr/0004-a-tool-says-where-it-is-working.md)) |
 | `noIdleApps` | `[]` | Applications in front of which idle time does not count: calls |
 | `repoRoots` | `["~/git"]` | Where a word from a window title is looked up as a directory |
 | `remotes` | `[]` | `{"match": "<substring of the remote URL>", "class": "work"\|"private"}`, first match wins |
@@ -22,12 +22,15 @@ run.
 ## How a moment is classified
 
 1. A manual pin from the menu or `zyt work` / `zyt private`, until the next lock.
-2. `apps[<frontmost application>]` when it is `work` or `private`.
-3. For an application marked `repo`: the remote of the repository it is in,
-   found from its working directory, from a word in its title, or from a
-   recent tool note, in that order ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
-4. The first `titles` rule whose text is in the window title.
-5. Otherwise the class that was already running.
+2. With no input for `idleSeconds` and a fresh note from a coding tool: the
+   class of that tool's repository.
+3. `apps[<frontmost application>]` when it is `work` or `private`.
+4. For an application marked `repo`: the remote of the repository it is in,
+   found from its working directory, from an absolute path in its title, from
+   a word in its title that names a checkout, or from a recent tool note, in
+   that order ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
+5. The first `titles` rule whose text is in the window title.
+6. Otherwise the class that was already running.
 
 ## `report`
 

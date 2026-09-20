@@ -34,15 +34,19 @@ end
 ---   obs.app     the frontmost application
 ---   obs.locked  the screen is locked
 ---   obs.asleep  the machine is asleep
+---   obs.working a coding tool has reported in within `signalSeconds`
 --- Idle time counts from the last input, but time in front of an application
---- in `noIdleApps` counts as present, so a call that ends with the focus
---- elsewhere is not wiped out by the idle minutes it contained: away starts
---- at the last input or at the last moment the person was seen present,
---- whichever is later.
+--- in `noIdleApps` counts as present, and so does time while a coding tool is
+--- working on the person's behalf: reading what it does is work without
+--- keystrokes. A lock ends both. Away starts at the last input or at the last
+--- moment the person was seen present, whichever is later, so a call or a
+--- session that ends with the focus elsewhere is not wiped out by the idle
+--- minutes it contained.
 function M.presence(state, now, obs)
   local rules = state.rules
   local idle = math.floor(obs.idle or 0)
-  local idleAway = idle >= rules.idleSeconds and not rules.noIdleApps[obs.app or ""]
+  local exempt = rules.noIdleApps[obs.app or ""] or obs.working
+  local idleAway = idle >= rules.idleSeconds and not exempt
   if not (obs.locked or obs.asleep or idleAway) then
     state.presentUntil = now
     return false, nil
