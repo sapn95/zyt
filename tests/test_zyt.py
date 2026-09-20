@@ -252,6 +252,74 @@ class ReportCommand(unittest.TestCase):
                 zyt.STATE, zyt.CONFIG = state, config
 
 
+class Board(unittest.TestCase):
+    def test_the_scale_is_the_window_widened_around_what_lies_outside_it(self):
+        self.assertEqual(zyt.scale({}, {}, REPORT), (7, 20))
+        late = {dt.date(2026, 9, 20): [seg("2026-09-20", "21:00", "23:40")]}
+        self.assertEqual(zyt.scale(late, {}, REPORT), (7, 24))
+        early = {dt.date(2026, 9, 20): [seg("2026-09-20", "05:20", "06:00")]}
+        self.assertEqual(zyt.scale(early, {}, REPORT), (5, 20))
+
+    def test_a_segment_cut_at_midnight_reaches_the_end_of_its_day(self):
+        self.assertEqual(zyt.span_of(seg("2026-09-19", "23:30", "00:00")), (23 * 60 + 30, 24 * 60))
+
+    def test_a_run_of_one_class_is_drawn_as_one_bar(self):
+        run = [
+            seg("2026-09-14", "09:00", "09:01"),
+            seg("2026-09-14", "09:01", "09:02"),
+            seg("2026-09-14", "09:02", "09:03", "private"),
+            seg("2026-09-14", "10:30", "11:00"),
+        ]
+        drawn = [(s.start.strftime("%H:%M"), s.end.strftime("%H:%M"), s.cls) for s in zyt.joined(run)]
+        self.assertEqual(drawn, [("09:00", "09:02", "work"), ("09:02", "09:03", "private"), ("10:30", "11:00", "work")])
+        self.assertEqual(run[0].end, at("2026-09-14", "09:01"))  # the rows themselves are left alone
+
+    def test_the_board_draws_both_lanes_and_fetches_nothing(self):
+        days = week(mon=480, sat=60)
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        segments = {day: [] for day in days}
+        segments[dt.date(2026, 9, 14)] = [seg("2026-09-14", "09:00", "17:00")]
+        page = zyt.render_board(days, segments, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.")
+        self.assertTrue(page.startswith("<!doctype html>"))
+        self.assertIn('title="work 09:00 to 17:00, 8h00"', page)  # the recorded lane
+        self.assertIn('title="book 09:00 to 14:00, 5h00"', page)  # and the proposal below it
+        self.assertIn("moved to the workdays", page)
+        for absent in ("<script", "http", "<img"):
+            self.assertNotIn(absent, page)
+
+    def test_a_bar_with_no_whole_minute_in_it_says_its_seconds(self):
+        self.assertEqual(zyt.said(seg("2026-09-14", "09:00", "17:00")), "work 09:00 to 17:00, 8h00")
+        moment = at("2026-09-14", "00:27")
+        flicker = zyt.Segment(moment, moment + dt.timedelta(seconds=20), "private")
+        self.assertEqual(zyt.said(flicker), "private 00:27:00, 20s")
+
+    def test_the_board_command_writes_the_file_it_is_given(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config, out = zyt.STATE, zyt.CONFIG, zyt.sys.stdout
+            zyt.STATE = Path(tmp) / "state"
+            zyt.CONFIG = Path(tmp) / "rules.json"
+            zyt.STATE.mkdir()
+            (zyt.STATE / "intervals.csv").write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T08:00:00+02:00,2026-09-14T12:00:00+02:00,14400,work,app,Mail\n"
+            )
+            page = Path(tmp) / "not" / "there" / "yet.html"
+            try:
+                zyt.sys.stdout = io.StringIO()
+                self.assertEqual(zyt.main(["board", "2026-W38", "--out", str(page), "--no-open"]), 0)
+                self.assertEqual(zyt.sys.stdout.getvalue().strip(), str(page))
+                self.assertIn("Week 2026-W38", page.read_text())
+                # a date rather than a week, and the day is on its own
+                self.assertEqual(zyt.main(["board", "2026-09-14", "--out", str(page), "--no-open"]), 0)
+                drawn = page.read_text()
+                self.assertIn("Monday 14.09.2026", drawn)
+                self.assertNotIn("left over", drawn)
+                self.assertNotIn("Tue", drawn)
+            finally:
+                zyt.sys.stdout = out
+                zyt.STATE, zyt.CONFIG = state, config
+
+
 class Intervals(unittest.TestCase):
     def test_rows_are_read_and_bad_ones_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:

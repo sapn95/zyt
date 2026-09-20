@@ -16,6 +16,7 @@ import contextlib
 import csv
 import datetime as dt
 import fcntl
+import html
 import json
 import os
 import re
@@ -58,6 +59,10 @@ REPORT_DEFAULTS = {
     "fillEmptyDays": False,
 }
 CHUNK_MINUTES = 15
+# How close two recorded segments of one class have to be for the board to draw
+# them as one bar. A tick that flickered between the classes and back leaves a
+# run of segments seconds long each, and a lane of those is a smear.
+JOIN_SECONDS = 60
 
 
 # ---------------------------------------------------------------------------
@@ -154,13 +159,21 @@ def summarise(day_segments: list) -> dict:
     }
 
 
-def week_days(segments: list, monday: dt.date) -> dict:
+def week_segments(segments: list, monday: dt.date) -> dict:
+    """The seven days of that week, each with the segments recorded in it, cut at
+    midnight and in order. The report adds them up; the board draws them."""
     days = {monday + dt.timedelta(days=i): [] for i in range(7)}
     for segment in split_by_day(segments):
         day = segment.start.date()
         if day in days:
             days[day].append(segment)
-    return {day: summarise(items) for day, items in days.items()}
+    for items in days.values():
+        items.sort(key=lambda segment: segment.start)
+    return days
+
+
+def week_days(segments: list, monday: dt.date) -> dict:
+    return {day: summarise(items) for day, items in week_segments(segments, monday).items()}
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +274,18 @@ def week_of(day: dt.date) -> str:
     return f"{year}-W{week:02d}"
 
 
+def period(when, single: bool) -> tuple:
+    """The Monday to work out, and the one day asked for or None. A day is still
+    worked out through its whole week: a day's booking is the week's minutes
+    dealt round, and the row for the day is then taken out of that."""
+    today = dt.date.today()
+    if single:
+        day = dt.date.fromisoformat(when) if when else today
+        return day - dt.timedelta(days=day.weekday()), day
+    monday = parse_week(when) if when else today - dt.timedelta(days=today.weekday())
+    return monday, None
+
+
 def booking_of(day: dt.date, summary: dict, blocks: dict) -> str:
     if day in blocks:
         return ", ".join(f"{clock(s)}-{clock(e)}" for s, e in blocks[day]) or "-"
@@ -318,6 +343,233 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
         },
         "leftover": leftover * 60 if leftover is not None else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# The board
+
+# One file, no script, nothing fetched: a board is a drawing of the week, and a
+# drawing of somebody's week does not need a network (ADR 0011).
+BOARD_STYLE = """
+:root {
+  color-scheme: light dark;
+  --work: #3373d9;
+  --private: #8c59bf;
+  --soft: rgba(51, 115, 217, 0.2);
+  --outline: rgba(51, 115, 217, 0.6);
+  --page: #f4f4f7;
+  --card: #fff;
+  --ink: #1c1c20;
+  --dim: #74747e;
+  --line: rgba(0, 0, 0, 0.09);
+  --lane: rgba(0, 0, 0, 0.05);
+  --rule: rgba(0, 0, 0, 0.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #16161a;
+    --card: #1e1e23;
+    --ink: #ededf2;
+    --dim: #9797a1;
+    --line: rgba(255, 255, 255, 0.11);
+    --lane: rgba(255, 255, 255, 0.06);
+    --rule: rgba(255, 255, 255, 0.08);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 2.75rem 1.5rem 3rem;
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1060px; margin: 0 auto; }
+h1 { margin: 0; font-size: 1.5rem; font-weight: 640; letter-spacing: -0.015em; }
+.sub { margin: 0.15rem 0 0; color: var(--dim); }
+.totals { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1.6rem 0 0; padding: 0; list-style: none; }
+.totals li { color: var(--dim); font-size: 0.8rem; }
+.totals b { display: block; margin-bottom: 0.1rem; color: var(--ink); font-size: 1.35rem; font-weight: 600; }
+.chart {
+  margin-top: 1.5rem;
+  padding: 1rem 1.4rem 1.2rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 13px;
+}
+.row { display: grid; grid-template-columns: 6rem 1fr 12.5rem; gap: 1.1rem; align-items: center; padding: 0.5rem 0; }
+.row + .row { border-top: 1px solid var(--line); }
+.axis { padding: 0 0 0.3rem; color: var(--dim); font-size: 0.7rem; }
+.axis .track { height: 0.9rem; }
+.axis .track span { position: absolute; top: 0; transform: translateX(-50%); }
+.track { position: relative; }
+.day { font-size: 0.9rem; color: var(--dim); }
+.day b { color: var(--ink); font-weight: 600; }
+.lane {
+  position: relative;
+  height: 1.1rem;
+  border-radius: 4px;
+  background-image:
+    repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px var(--hour)),
+    linear-gradient(var(--lane), var(--lane));
+}
+.lane + .lane { margin-top: 4px; }
+.lane span { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: 3px; }
+.work { background: var(--work); }
+.private { background: var(--private); }
+.book { background: var(--soft); box-shadow: inset 0 0 0 1px var(--outline); }
+.figures { font-size: 0.78rem; color: var(--dim); }
+.figures b { margin-right: 0.35rem; color: var(--ink); font-size: 0.95rem; font-weight: 600; }
+.booking { display: block; margin-top: 0.1rem; }
+footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.2rem;
+  margin-top: 1.1rem;
+  color: var(--dim);
+  font-size: 0.74rem;
+}
+.key { display: inline-flex; align-items: center; gap: 0.4rem; }
+.key i { display: inline-block; width: 0.8rem; height: 0.8rem; border-radius: 3px; }
+.made { margin-left: auto; }
+@media (max-width: 760px) {
+  .row { grid-template-columns: 5rem 1fr; }
+  .figures { grid-column: 2; }
+  .made { margin-left: 0; }
+}
+"""
+
+
+def span_of(segment: Segment) -> tuple:
+    """A segment as minutes from the midnight of the day it starts in. One that
+    was cut at midnight ends at 1440 here, rather than back at nothing."""
+    midnight = dt.datetime.combine(segment.start.date(), dt.time(), tzinfo=segment.start.tzinfo)
+    return (segment.start - midnight).total_seconds() / 60, (segment.end - midnight).total_seconds() / 60
+
+
+def scale(segments: dict, blocks: dict, report: dict) -> tuple:
+    """The first and last whole hour on show: the hours that may be booked,
+    widened around anything recorded or proposed outside them. An evening on the
+    laptop is drawn where it happened rather than clipped off the end."""
+    first, last = minutes(report["earliest"]) // 60, -(-minutes(report["latest"]) // 60)
+    edges = [span_of(segment) for items in segments.values() for segment in items]
+    edges += [(start, end) for items in blocks.values() for start, end in items]
+    for start, end in edges:
+        first = min(first, int(start // 60))
+        last = max(last, int(-(-end // 60)))
+    return first, max(last, first + 1)
+
+
+def joined(segments: list) -> list:
+    """The same hours, in as few bars as tell the truth: a run of segments of one
+    class with no real gap between them becomes one. Nothing is added up
+    differently, and where the class actually changed it still changes."""
+    out = []
+    for segment in segments:
+        last = out[-1] if out else None
+        if last and last.cls == segment.cls and (segment.start - last.end).total_seconds() <= JOIN_SECONDS:
+            last.end = max(last.end, segment.end)
+        else:
+            out.append(Segment(segment.start, segment.end, segment.cls))
+    return out
+
+
+def said(segment: Segment) -> str:
+    """What a bar says when it is hovered. A segment with no whole minute in it says
+    its seconds: a sliver that claimed to have taken 0h00 would be a lie about the
+    one thing it is there to report."""
+    if segment.seconds < 60:
+        return f"{segment.cls} {segment.start:%H:%M:%S}, {segment.seconds}s"
+    return f"{segment.cls} {segment.start:%H:%M} to {segment.end:%H:%M}, {fmt_h(segment.seconds)}"
+
+
+def bars(spans: list, first: int, total: int) -> str:
+    """One positioned bar per span, as a percentage of the hours on show. The
+    title is what a bar says when it is too narrow to say anything itself."""
+    out = []
+    for start, end, kind, label in spans:
+        left = (start - first * 60) / total * 100
+        width = (end - start) / total * 100
+        out.append(
+            f'<span class="{kind}" style="left:{left:.4f}%;width:{width:.4f}%" title="{html.escape(label)}"></span>'
+        )
+    return "".join(out)
+
+
+def render_board(days, segments, blocks, booked, leftover, report, heading, sub) -> str:
+    """The week as one page: per day the hours recorded on the upper lane and the
+    proposal on the lower one, both on the same hour scale, so that what would be
+    booked can be held against what happened."""
+    first, last = scale(segments, blocks, report)
+    total = (last - first) * 60
+    # Every hour is named while the names still have room; a day that reaches
+    # from before dawn to after midnight gets every second one instead.
+    step = 1 if last - first <= 18 else 2
+    ticks = "".join(
+        f'<span style="left:{(hour - first) * 60 / total * 100:.4f}%">{hour:02d}</span>'
+        for hour in range(first, last + 1, step)
+    )
+    rows = [f'<div class="row axis"><div></div><div class="track">{ticks}</div><div></div></div>']
+    work = private = filled = 0
+    for day in sorted(days):
+        summary = days[day]
+        work += summary["work"] // 60
+        private += summary["private"] // 60
+        recorded = [(*span_of(segment), segment.cls, said(segment)) for segment in joined(segments.get(day, []))]
+        proposed = [
+            (start, end, "book", f"book {clock(start)} to {clock(end)}, {fmt_m(end - start)}")
+            for start, end in blocks.get(day, [])
+        ]
+        figures = f"<b>{fmt_h(summary['work'])}</b>"
+        if summary["private"]:
+            figures += f"<span>{fmt_h(summary['private'])} private</span>"
+        if day in blocks:
+            filled += booked[day]
+            booking = " · ".join(f"{clock(start)}–{clock(end)}" for start, end in blocks[day]) or "nothing to book"
+        else:
+            booking = "moved to the workdays" if summary["work"] else "not a workday"
+        rows.append(
+            f'<div class="row"><div class="day"><b>{day:%a}</b> {day:%d.%m.}</div>'
+            f'<div class="track"><div class="lane">{bars(recorded, first, total)}</div>'
+            f'<div class="lane">{bars(proposed, first, total)}</div></div>'
+            f'<div class="figures">{figures}<span class="booking">{html.escape(booking)}</span></div></div>'
+        )
+    totals = [(fmt_m(work), "recorded work"), (fmt_m(private), "private"), (fmt_m(filled), "booked")]
+    if leftover is not None:
+        totals.append((fmt_m(leftover), "left over"))
+    keys = [("work", "recorded work"), ("private", "private"), ("book", "proposed booking")]
+    source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)
+    made = f"written {dt.datetime.now():%d.%m.%Y %H:%M} from {source} · one file, no script, nothing fetched"
+    return "\n".join(
+        [
+            "<!doctype html>",
+            '<html lang="en">',
+            "<head>",
+            '<meta charset="utf-8">',
+            '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            f"<title>zyt · {html.escape(heading)}</title>",
+            f"<style>{BOARD_STYLE}</style>",
+            "</head>",
+            "<body>",
+            "<main>",
+            f"<h1>{html.escape(heading)}</h1>",
+            f'<p class="sub">{html.escape(sub)}</p>',
+            '<ul class="totals">'
+            + "".join(f"<li><b>{amount}</b>{html.escape(what)}</li>" for amount, what in totals)
+            + "</ul>",
+            f'<section class="chart" style="--hour:{100 / (last - first):.4f}%">' + "".join(rows) + "</section>",
+            "<footer>"
+            + "".join(f'<span class="key"><i class="{kind}"></i>{html.escape(what)}</span>' for kind, what in keys)
+            + f'<span class="made">{html.escape(made)}</span></footer>',
+            "</main>",
+            "</body>",
+            "</html>",
+            "",
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -445,15 +697,11 @@ def cmd_switch(args) -> int:
 
 def cmd_report(args) -> int:
     rules = load_rules()
-    if args.command == "day":
-        day = dt.date.fromisoformat(args.when) if args.when else dt.date.today()
-        monday = day - dt.timedelta(days=day.weekday())
-    else:
-        monday = parse_week(args.when) if args.when else dt.date.today() - dt.timedelta(days=dt.date.today().weekday())
+    monday, day = period(args.when, args.command == "day")
     days = week_days(read_intervals(STATE / "intervals.csv"), monday)
     blocks, booked, leftover = propose(days, rules["report"])
     title = None
-    if args.command == "day":
+    if day:
         days = {day: days[day]}
         leftover = None
         title = f"{day:%A %d.%m.%Y}  (week {week_of(day)})"
@@ -461,6 +709,33 @@ def cmd_report(args) -> int:
         print(json.dumps(week_json(days, blocks, booked, leftover), indent=2))
     else:
         print(render_week(monday, days, blocks, booked, leftover, title))
+    return 0
+
+
+def cmd_board(args) -> int:
+    """The week the report prints, drawn instead of tabulated, and opened."""
+    rules = load_rules()
+    single = bool(args.when) and "-W" not in args.when.upper()
+    monday, day = period(args.when, single)
+    segments = week_segments(read_intervals(STATE / "intervals.csv"), monday)
+    days = {each: summarise(items) for each, items in segments.items()}
+    blocks, booked, leftover = propose(days, rules["report"])
+    if day:
+        segments, days, leftover = {day: segments[day]}, {day: days[day]}, None
+        heading, sub = f"{day:%A %d.%m.%Y}", f"week {week_of(day)}"
+    else:
+        heading = f"Week {week_of(monday)}"
+        sub = f"{monday:%A %d.%m.} to {monday + dt.timedelta(days=6):%A %d.%m.%Y}"
+    page = render_board(days, segments, blocks, booked, leftover, rules["report"], heading, sub)
+    out = Path(args.out).expanduser() if args.out else STATE / "board.html"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(page)
+    print(out)
+    if not args.no_open:
+        try:
+            subprocess.run(["open", str(out)], timeout=10, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            print("could not open it; the line above is where it is", file=sys.stderr)
     return 0
 
 
@@ -730,6 +1005,11 @@ def main(argv=None) -> int:
         report.add_argument("when", nargs="?", metavar=when)
         report.add_argument("--json", action="store_true")
         report.set_defaults(run=cmd_report)
+    board = sub.add_parser("board", help="the same week or day as one HTML file, and open it")
+    board.add_argument("when", nargs="?", metavar="YYYY-Www|YYYY-MM-DD")
+    board.add_argument("--out", metavar="FILE", help=f"where to write it, default {STATE / 'board.html'}")
+    board.add_argument("--no-open", action="store_true", help="write it and leave it closed")
+    board.set_defaults(run=cmd_board)
     hook = sub.add_parser("hook", help="stdin hook for a coding tool (Claude Code)")
     hook.add_argument("tool", choices=["claude-code"])
     hook.set_defaults(run=cmd_hook)
