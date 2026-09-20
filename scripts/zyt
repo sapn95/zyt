@@ -12,8 +12,10 @@ Standard library only, and nothing newer than the python3 a Mac ships with.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime as dt
+import fcntl
 import json
 import os
 import re
@@ -480,6 +482,22 @@ def write_note(path: Path, note: dict) -> dict:
     return note
 
 
+@contextlib.contextmanager
+def locked(path: Path):
+    """One session's hooks can land at once: a prompt while a task the model
+    left running in the background reports a tool it used. Both would read the
+    note, both would write it back, and the later one would erase what the other
+    had just learnt. The lock is a file of its own, so the note itself stays one
+    atomic rename and the Spoon never has to take a lock to read it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(handle)  # which releases the lock
+
+
 def read_note(path: Path) -> dict:
     try:
         note = json.loads(path.read_text())
@@ -488,14 +506,16 @@ def read_note(path: Path) -> dict:
     return note if isinstance(note, dict) else {}
 
 
-def write_context(source: str, cwd: str, state=None, name: str = "context", session=None, remote=UNKNOWN) -> dict:
+def write_context(
+    source: str, cwd: str, state=None, name: str = "context", session=None, remote=UNKNOWN, at=None
+) -> dict:
     """Leave a note for the Spoon: which directory a tool is working in, and
     which remote that belongs to."""
     state = state or STATE
     return write_note(
         (state / f"{name}.json"),
         {
-            "at": int(time.time()),
+            "at": int(time.time()) if at is None else at,
             "source": source,
             "cwd": cwd,
             "remote": git_remote(cwd) if remote is UNKNOWN else remote,
@@ -522,7 +542,7 @@ def prune_sessions(directory: Path, now: float) -> None:
             continue
 
 
-def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, state=None):
+def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, state=None, at=None):
     """One note per chat session, so that several sessions running in the same
     editor can be told apart.
 
@@ -537,20 +557,21 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
         return None
     directory = state / "sessions"
     path = directory / f"{session}.json"
-    before = read_note(path)
-    now = int(time.time())
-    note = write_note(
-        path,
-        {
-            "at": now,
-            "promptAt": now if prompt else before.get("promptAt"),
-            "source": source,
-            "cwd": cwd,
-            "remote": (git_remote(cwd) if remote is UNKNOWN else remote) or before.get("remote"),
-            "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
-            "session": session,
-        },
-    )
+    now = int(time.time()) if at is None else at
+    with locked(directory / f"{session}.lock"):
+        before = read_note(path)
+        note = write_note(
+            path,
+            {
+                "at": now,
+                "promptAt": now if prompt else before.get("promptAt"),
+                "source": source,
+                "cwd": cwd,
+                "remote": (git_remote(cwd) if remote is UNKNOWN else remote) or before.get("remote"),
+                "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
+                "session": session,
+            },
+        )
     prune_sessions(directory, now)
     return note
 
@@ -587,18 +608,21 @@ def cmd_hook(args) -> int:
     session = payload.get("session_id") if isinstance(payload, dict) else None
     prompt = isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit"
     remote = git_remote(where)
+    # One event, one timestamp, however long the git call takes: the Spoon tells
+    # the notes of the same prompt apart from an older chat's by comparing them.
+    at = int(time.time())
     # The session's own note knows more than this one event does: the remote it
     # last touched, even when the event itself is a prompt in a folder that is
     # no checkout.
-    note = write_session(args.tool, where, session, prompt, remote=remote)
+    note = write_session(args.tool, where, session, prompt, remote=remote, at=at)
     if note:
         remote = note["remote"]
-    write_context(args.tool, where, session=session, remote=remote)
+    write_context(args.tool, where, session=session, remote=remote, at=at)
     # A prompt is the person talking to this chat. Several sessions can be
     # working at once, and only one of them is the one being typed into; the
     # Spoon uses this second note to classify the editor's window.
     if prompt:
-        write_context(args.tool, where, name="chat", session=session, remote=remote)
+        write_context(args.tool, where, name="chat", session=session, remote=remote, at=at)
     return 0
 
 

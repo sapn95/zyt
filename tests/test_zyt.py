@@ -345,7 +345,17 @@ class Hook(unittest.TestCase):
             worked = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state)
             self.assertEqual(worked["promptAt"], later["promptAt"])
             self.assertEqual(json.loads((state / "sessions" / "abc.json").read_text()), worked)
-            self.assertEqual([path.name for path in (state / "sessions").iterdir()], ["abc.json"])
+            # the note and the lock that serialises the hooks writing it, and no
+            # temporary file left behind
+            self.assertEqual(sorted(path.name for path in (state / "sessions").iterdir()), ["abc.json", "abc.lock"])
+
+    def test_the_lock_is_a_file_of_its_own_and_is_let_go_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sessions" / "abc.lock"
+            with zyt.locked(path):
+                self.assertTrue(path.exists())
+            with zyt.locked(path):  # a second hook is not kept out for ever
+                pass
 
     def test_a_session_that_has_only_worked_is_no_chat(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -382,9 +392,13 @@ class Hook(unittest.TestCase):
                         json.dumps({"cwd": tmp, "hook_event_name": "UserPromptSubmit", "session_id": session})
                     )
                     zyt.main(["hook", "claude-code"])
-                written = sorted(path.name for path in (zyt.STATE / "sessions").iterdir())
+                written = sorted(path.name for path in (zyt.STATE / "sessions").iterdir() if path.suffix == ".json")
                 self.assertEqual(written, ["a.json", "b.json"])
                 self.assertEqual(zyt.sys.stdout.getvalue(), "")
+                # both notes of one prompt carry the same second, so the Spoon
+                # can tell them apart from an older chat's note
+                note = json.loads((zyt.STATE / "sessions" / "b.json").read_text())
+                self.assertEqual(note["promptAt"], json.loads((zyt.STATE / "chat.json").read_text())["at"])
             finally:
                 zyt.sys.stdin, zyt.sys.stdout = stdin, stdout
                 zyt.STATE = state
