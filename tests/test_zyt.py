@@ -347,15 +347,28 @@ class Hook(unittest.TestCase):
             self.assertEqual(json.loads((state / "sessions" / "abc.json").read_text()), worked)
             # the note and the lock that serialises the hooks writing it, and no
             # temporary file left behind
-            self.assertEqual(sorted(path.name for path in (state / "sessions").iterdir()), ["abc.json", "abc.lock"])
+            self.assertEqual(sorted(path.name for path in (state / "sessions").iterdir()), [".lock", "abc.json"])
 
     def test_the_lock_is_a_file_of_its_own_and_is_let_go_again(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "sessions" / "abc.lock"
+            path = Path(tmp) / "sessions" / zyt.SESSION_LOCK
             with zyt.locked(path):
                 self.assertTrue(path.exists())
             with zyt.locked(path):  # a second hook is not kept out for ever
                 pass
+
+    def test_the_lock_outlives_the_notes_it_guards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "sessions"
+            zyt.write_session("claude-code", tmp, "old", True, remote=None, state=Path(tmp))
+            long_ago = time.time() - zyt.SESSION_TTL - 60
+            for name in ("old.json", zyt.SESSION_LOCK):
+                os.utime(directory / name, (long_ago, long_ago))
+            # a lock is empty and keeps the date it was made, so its age says
+            # nothing; unlinking it while a hook holds it would undo the point
+            zyt.prune_sessions(directory, time.time())
+            self.assertFalse((directory / "old.json").exists())
+            self.assertTrue((directory / zyt.SESSION_LOCK).exists())
 
     def test_a_session_that_has_only_worked_is_no_chat(self):
         with tempfile.TemporaryDirectory() as tmp:
