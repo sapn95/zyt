@@ -32,9 +32,11 @@ and is no chat; the busy ones are what `context.json` is for. The merge takes a
 lock on one empty file in that directory, because a session's hooks do arrive at
 once: a prompt typed while a task left running in the background reports the
 file it touched. Both would read the note and the later write would erase what
-the other had just learnt. The lock is never deleted, so it cannot be unlinked
-from under a hook that holds it, and one lock for the directory means there is
-nothing to decide about that.
+the other had just learnt. Expired notes are dropped under the same lock, so
+one that looked stale cannot be deleted after the session it belongs to has
+written it again. The lock is never deleted, so it cannot be unlinked from under
+a hook that holds it, and one lock for the directory means there is nothing to
+decide about that.
 
 **Agreement is certainty.** The Spoon reads every note, keeps the ones written
 by the application in front and typed into within `chatSeconds`, and asks the
