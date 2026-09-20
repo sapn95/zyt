@@ -31,8 +31,8 @@ W                          ← the menu-bar item: work is running
 
 ## How it decides
 
-Every thirty seconds the Spoon looks at the frontmost window and asks the
-rules, in this order:
+Every thirty seconds, and whenever another application comes to the front,
+the Spoon looks at the frontmost window and asks the rules, in this order:
 
 1. **A pin.** `Work` or `Private` from the menu, `zyt work` or `zyt private`
    from a shell. It holds until the screen locks.
