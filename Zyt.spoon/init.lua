@@ -253,9 +253,12 @@ function obj:chats()
   local directory = self.statePath .. "/sessions"
   local out = {}
   local now = os.time()
-  local ok, iterator = pcall(hs.fs.dir, directory)
+  -- The iterator needs the directory object it comes with; called without it,
+  -- it raises "directory metatable expected, got nil" on the first step. A
+  -- directory that is not there at all is what the pcall is for.
+  local ok, iterator, directoryObject = pcall(hs.fs.dir, directory)
   if ok and iterator then
-    for name in iterator do
+    for name in iterator, directoryObject do
       if name:sub(-5) == ".json" then
         local decoded = readJSON(directory .. "/" .. name)
         if decoded and type(decoded.promptAt) == "number" then
@@ -331,7 +334,9 @@ end
 
 --- The chat the person named for this application, while that choice still
 --- stands. Typing into another one of them replaces it: they have said where
---- they are by saying something there.
+--- they are by saying something there. Only the chats of this application can
+--- do that. A prompt typed in the other editor says nothing about which panel
+--- is in front here.
 function obj:stillChosen(bundle, chats)
   local at = bundle or ""
   local choice = self.chosen[at]
@@ -339,7 +344,7 @@ function obj:stillChosen(bundle, chats)
     return nil
   end
   for _, chat in ipairs(chats) do
-    if chat.session ~= choice.session and (chat.promptAt or 0) > choice.at then
+    if chat.bundle == bundle and chat.session ~= choice.session and (chat.promptAt or 0) > choice.at then
       self.chosen[at] = nil
       return nil
     end
@@ -373,14 +378,23 @@ function obj:recall(now, obs)
   end
   if answer == nil and key and self.rules.prompt.enabled and idleIsShort(obs.idle) then
     if learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
-      self.asked[key] = now
-      self:ask("whose time is this?", remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app, {
-        { id = "work", label = "Work", colour = COLOURS.work },
-        { id = "private", label = "Private", colour = COLOURS.private },
-        { id = "inherit", label = "Don't ask", colour = COLOURS.other },
-      }, function(id)
-        self:answer(key, id)
-      end)
+      local shown = self:ask(
+        "whose time is this?",
+        remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app,
+        {
+          { id = "work", label = "Work", colour = COLOURS.work },
+          { id = "private", label = "Private", colour = COLOURS.private },
+          { id = "inherit", label = "Don't ask", colour = COLOURS.other },
+        },
+        function(id)
+          self:answer(key, id)
+        end
+      )
+      -- The cooldown counts from a question somebody saw. Another panel being
+      -- up already is not an answer, and next tick is soon enough to try again.
+      if shown then
+        self.asked[key] = now
+      end
     end
   end
   return nil
@@ -409,10 +423,12 @@ function obj:askWhich(now, obs)
   if #choices < 2 then
     return
   end
-  self.asked[key] = now
-  self:ask("which chat are you in?", obs.app, choices, function(id)
+  local shown = self:ask("which chat are you in?", obs.app, choices, function(id)
     self:choose(obs.bundle, id)
   end)
+  if shown then
+    self.asked[key] = now
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -446,10 +462,11 @@ end
 --- Method
 --- A small panel under the menu bar with one button per choice, each
 --- `{ id, label, colour }`. It goes away by itself after `prompt.seconds`, and
---- nothing changes until it is answered.
+--- nothing changes until it is answered. Returns true when it showed: one panel
+--- is up at a time, and a question that lost the place was never asked.
 function obj:ask(headline, what, choices, answered)
   if self.prompt or #choices == 0 then
-    return
+    return false
   end
   local screen = hs.screen.mainScreen():frame()
   local w, h, pad, gap = 380, 92, 14, 10
@@ -506,6 +523,7 @@ function obj:ask(headline, what, choices, answered)
       self:dismiss()
     end),
   }
+  return true
 end
 
 function obj:dismiss()
