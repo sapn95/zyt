@@ -83,6 +83,13 @@ in one editor that chat, not whichever session is busy, decides its class
 ([ADR 0004](docs/adr/0004-a-tool-says-where-it-is-working.md)). Any other tool
 can leave the same note with `zyt context <name> <directory>`.
 
+Each session gets a note of its own, so several chats in one editor can be told
+apart. When they are all in repositories of the same class, that is the class,
+whichever panel you are reading. When they straddle both, zyt asks which chat
+you are in and puts the repositories on the buttons: nothing on screen can say,
+because the editor does not expose its panels. The same list is in the menu
+([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
+
 ```json
 "hooks": {
   "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "zyt hook claude-code" }] }],

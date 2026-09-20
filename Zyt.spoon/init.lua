@@ -66,6 +66,10 @@ obj.override = nil
 obj.locked = false
 obj.asleep = false
 
+--- Per application, the chat the person said they were in, and when they said
+--- it. In memory only: it is an answer about this afternoon, not a rule.
+obj.chosen = {}
+
 -- ---------------------------------------------------------------------------
 -- Files
 
@@ -77,6 +81,18 @@ local function readFile(path)
   local text = file:read("a")
   file:close()
   return text
+end
+
+local function readJSON(path)
+  local text = readFile(path)
+  if not text then
+    return nil
+  end
+  local ok, decoded = pcall(hs.json.decode, text)
+  if not ok or type(decoded) ~= "table" then
+    return nil
+  end
+  return decoded
 end
 
 local function ensureDirectory(path)
@@ -176,6 +192,20 @@ local function idleIsShort(idle)
   return type(idle) == "number" and idle < 120
 end
 
+local COLOURS = {
+  work = { red = 0.20, green = 0.45, blue = 0.85 },
+  private = { red = 0.55, green = 0.35, blue = 0.75 },
+  other = { red = 0.35, green = 0.35, blue = 0.38 },
+}
+
+--- The last part of a remote's path, which is what people call a repository.
+local function shortRepo(remote)
+  if type(remote) ~= "string" then
+    return "?"
+  end
+  return (remote:gsub("%.git$", "")):match("([^/:]+)$") or remote
+end
+
 local function iterm2Path()
   local ok, out = hs.osascript.applescript(
     'tell application "iTerm2" to tell current session of current window to get variable named "session.path"'
@@ -187,12 +217,8 @@ local function iterm2Path()
 end
 
 function obj:note(name)
-  local text = readFile(self.statePath .. "/" .. name .. ".json")
-  if not text then
-    return nil
-  end
-  local ok, decoded = pcall(hs.json.decode, text)
-  if not ok or type(decoded) ~= "table" or type(decoded.at) ~= "number" then
+  local decoded = readJSON(self.statePath .. "/" .. name .. ".json")
+  if not decoded or type(decoded.at) ~= "number" then
     return nil
   end
   return { age = os.time() - decoded.at, remote = decoded.remote, source = decoded.source, bundle = decoded.bundle }
@@ -206,6 +232,39 @@ end
 --- The last prompt the person typed: the chat they are talking to.
 function obj:chat()
   return self:note("chat")
+end
+
+--- Every chat that has been typed into, one note per session, newest prompt
+--- first. A session that has only ever worked is not a chat anybody is looking
+--- at and has no `promptAt`, so it is left out here; the busy sessions are what
+--- `signal` is for.
+function obj:chats()
+  local directory = self.statePath .. "/sessions"
+  local out = {}
+  local ok, iterator = pcall(hs.fs.dir, directory)
+  if not ok or not iterator then
+    return out
+  end
+  local now = os.time()
+  for name in iterator do
+    if name:sub(-5) == ".json" then
+      local decoded = readJSON(directory .. "/" .. name)
+      if decoded and type(decoded.promptAt) == "number" then
+        out[#out + 1] = {
+          age = now - decoded.promptAt,
+          promptAt = decoded.promptAt,
+          remote = decoded.remote,
+          source = decoded.source,
+          bundle = decoded.bundle,
+          session = decoded.session,
+        }
+      end
+    end
+  end
+  table.sort(out, function(a, b)
+    return a.promptAt > b.promptAt
+  end)
+  return out
 end
 
 function obj:observe(now)
@@ -226,6 +285,13 @@ function obj:observe(now)
     return { class = self.override, source = "manual", app = app }
   end
   local cwdOf = self.cwdOf[app]
+  local chats = self:chats()
+  if #chats == 0 then
+    -- Nothing has written a session note yet: fall back on the single note an
+    -- older hook left behind.
+    local chat = self:chat()
+    chats = chat and { chat } or {}
+  end
   local obs = {
     app = app,
     bundle = bundle,
@@ -233,14 +299,48 @@ function obj:observe(now)
     idle = idle,
     cwd = cwdOf and cwdOf() or nil,
     signal = signal,
-    chat = self:chat(),
+    chats = chats,
+    chosen = self:stillChosen(bundle, chats),
     resolve = self.resolve,
   }
-  local class, source = classify.decide(self.rules, obs)
+  self.seen = { app = app, bundle = bundle, chats = classify.liveChats(self.rules, obs) }
+  local class, source, unsure = classify.decide(self.rules, obs)
+  if unsure then
+    self:askWhich(now, obs)
+  end
   if not class then
     class, source = self:recall(now, obs)
   end
   return { class = class, source = source, app = app }
+end
+
+--- The chat the person named for this application, while that choice still
+--- stands. Typing into another one of them replaces it: they have said where
+--- they are by saying something there.
+function obj:stillChosen(bundle, chats)
+  local at = bundle or ""
+  local choice = self.chosen[at]
+  if not choice then
+    return nil
+  end
+  for _, chat in ipairs(chats) do
+    if chat.session ~= choice.session and (chat.promptAt or 0) > choice.at then
+      self.chosen[at] = nil
+      return nil
+    end
+  end
+  return choice.session
+end
+
+--- Zyt:choose(bundle, session)
+--- Method
+--- Take the person's word for which of the chats open in an application they
+--- are in. Nothing on screen can say: the editor's accessibility tree does not
+--- expose its panels.
+function obj:choose(bundle, session)
+  self.chosen[bundle or ""] = { session = session, at = os.time() }
+  self:dismiss()
+  self:tick()
 end
 
 --- What the person answered the last time this window came up, or a fresh
@@ -259,10 +359,45 @@ function obj:recall(now, obs)
   if answer == nil and key and self.rules.prompt.enabled and idleIsShort(obs.idle) then
     if learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
       self.asked[key] = now
-      self:ask(key, remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app)
+      self:ask("whose time is this?", remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app, {
+        { id = "work", label = "Work", colour = COLOURS.work },
+        { id = "private", label = "Private", colour = COLOURS.private },
+        { id = "inherit", label = "Don't ask", colour = COLOURS.other },
+      }, function(id)
+        self:answer(key, id)
+      end)
     end
   end
   return nil
+end
+
+--- Two chats are open in this application, one work and one private, and
+--- nothing on screen says which panel is in front. Ask, with the repositories
+--- as the buttons, at most once per cooldown and only while somebody is there
+--- to answer. Until they do, the class is the chat they last typed into.
+function obj:askWhich(now, obs)
+  local key = "chat:" .. (obs.bundle or obs.app or "")
+  if not self.rules.prompt.enabled or not idleIsShort(obs.idle) then
+    return
+  end
+  if not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
+    return
+  end
+  local _, _, candidates = classify.chatOf(self.rules, obs)
+  local choices = {}
+  for _, chat in ipairs(candidates or {}) do
+    if type(chat.session) == "string" and #choices < 3 then
+      local class = classify.remoteClass(self.rules, chat.remote)
+      choices[#choices + 1] = { id = chat.session, label = shortRepo(chat.remote), colour = COLOURS[class] }
+    end
+  end
+  if #choices < 2 then
+    return
+  end
+  self.asked[key] = now
+  self:ask("which chat are you in?", obs.app, choices, function(id)
+    self:choose(obs.bundle, id)
+  end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -287,43 +422,23 @@ end
 function obj:forget()
   self.learned = {}
   self.asked = {}
+  self.chosen = {}
   os.remove(self.statePath .. "/learned.json")
   self:tick()
 end
 
---- Zyt:ask(key, what)
+--- Zyt:ask(headline, what, choices, answered)
 --- Method
---- A small panel under the menu bar: Work, Private, or Don't ask. It goes
---- away by itself after `prompt.seconds`, and the class stays what it was
---- until it is answered.
-function obj:ask(key, what)
-  if self.prompt then
+--- A small panel under the menu bar with one button per choice, each
+--- `{ id, label, colour }`. It goes away by itself after `prompt.seconds`, and
+--- nothing changes until it is answered.
+function obj:ask(headline, what, choices, answered)
+  if self.prompt or #choices == 0 then
     return
   end
   local screen = hs.screen.mainScreen():frame()
-  local w, h = 380, 92
+  local w, h, pad, gap = 380, 92, 14, 10
   local canvas = hs.canvas.new({ x = screen.x + screen.w - w - 12, y = screen.y + 6, w = w, h = h })
-  local function button(id, x, width, label, color)
-    return {
-      {
-        id = id,
-        type = "rectangle",
-        action = "fill",
-        frame = { x = x, y = 54, w = width, h = 28 },
-        fillColor = color,
-        roundedRectRadii = { xRadius = 6, yRadius = 6 },
-        trackMouseUp = true,
-      },
-      {
-        type = "text",
-        text = label,
-        textSize = 13,
-        textColor = { white = 1 },
-        textAlignment = "center",
-        frame = { x = x, y = 58, w = width, h = 22 },
-      },
-    }
-  end
   canvas:appendElements({
     type = "rectangle",
     action = "fill",
@@ -331,29 +446,40 @@ function obj:ask(key, what)
     roundedRectRadii = { xRadius = 10, yRadius = 10 },
   }, {
     type = "text",
-    text = "zyt · whose time is this?",
+    text = "zyt · " .. headline,
     textSize = 12,
     textColor = { white = 0.7 },
-    frame = { x = 14, y = 8, w = w - 28, h = 18 },
+    frame = { x = pad, y = 8, w = w - 2 * pad, h = 18 },
   }, {
     type = "text",
     text = what or "",
     textSize = 14,
     textColor = { white = 1 },
-    frame = { x = 14, y = 26, w = w - 28, h = 22 },
+    frame = { x = pad, y = 26, w = w - 2 * pad, h = 22 },
   })
-  for _, element in ipairs(button("work", 14, 100, "Work", { red = 0.20, green = 0.45, blue = 0.85 })) do
-    canvas:appendElements(element)
-  end
-  for _, element in ipairs(button("private", 124, 100, "Private", { red = 0.55, green = 0.35, blue = 0.75 })) do
-    canvas:appendElements(element)
-  end
-  for _, element in ipairs(button("inherit", 234, 132, "Don't ask", { red = 0.35, green = 0.35, blue = 0.38 })) do
-    canvas:appendElements(element)
+  local width = math.floor((w - 2 * pad - gap * (#choices - 1)) / #choices)
+  for index, choice in ipairs(choices) do
+    local x = pad + (index - 1) * (width + gap)
+    canvas:appendElements({
+      id = choice.id,
+      type = "rectangle",
+      action = "fill",
+      frame = { x = x, y = 54, w = width, h = 28 },
+      fillColor = choice.colour,
+      roundedRectRadii = { xRadius = 6, yRadius = 6 },
+      trackMouseUp = true,
+    }, {
+      type = "text",
+      text = choice.label,
+      textSize = 13,
+      textColor = { white = 1 },
+      textAlignment = "center",
+      frame = { x = x, y = 58, w = width, h = 22 },
+    })
   end
   canvas:mouseCallback(function(_, event, id)
     if event == "mouseUp" then
-      self:answer(key, id)
+      answered(id)
     end
   end)
   canvas:clickActivating(false)
@@ -361,7 +487,6 @@ function obj:ask(key, what)
   canvas:show()
   self.prompt = {
     canvas = canvas,
-    key = key,
     timer = hs.timer.doAfter(self.rules.prompt.seconds, function()
       self:dismiss()
     end),
@@ -526,6 +651,35 @@ function obj:openRules()
   hs.execute(("open %q"):format(self.configPath))
 end
 
+--- The chats open in the application that was last in front, so that the one
+--- being talked to can be named without waiting for the panel to ask. Empty
+--- unless there are at least two of them: with one there is nothing to choose.
+function obj:chatMenu()
+  local seen = self.seen or {}
+  local chats = seen.chats or {}
+  if #chats < 2 then
+    return {}
+  end
+  local choice = self.chosen[seen.bundle or ""]
+  local items = { { title = "-" }, { title = "Which chat in " .. (seen.app or "?") .. "?", disabled = true } }
+  for _, chat in ipairs(chats) do
+    items[#items + 1] = {
+      title = ("%s · %s · typed %s"):format(
+        shortRepo(chat.remote),
+        classify.remoteClass(self.rules, chat.remote) or "unknown",
+        os.date("%H:%M", chat.promptAt)
+      ),
+      indent = 1,
+      checked = choice ~= nil and choice.session == chat.session,
+      disabled = type(chat.session) ~= "string",
+      fn = function()
+        self:choose(seen.bundle, chat.session)
+      end,
+    }
+  end
+  return items
+end
+
 function obj:menu()
   local today = self:today()
   local function choice(title, class)
@@ -537,7 +691,7 @@ function obj:menu()
       end,
     }
   end
-  return {
+  local items = {
     choice("Work", "work"),
     choice("Private", "private"),
     choice("Auto", nil),
@@ -572,14 +726,18 @@ function obj:menu()
         self:forget()
       end,
     },
-    { title = "-" },
-    {
-      title = "Quit zyt",
-      fn = function()
-        self:stop()
-      end,
-    },
   }
+  for _, item in ipairs(self:chatMenu()) do
+    items[#items + 1] = item
+  end
+  items[#items + 1] = { title = "-" }
+  items[#items + 1] = {
+    title = "Quit zyt",
+    fn = function()
+      self:stop()
+    end,
+  }
+  return items
 end
 
 function obj:refresh(obs)
