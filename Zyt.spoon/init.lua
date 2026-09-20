@@ -195,11 +195,14 @@ end
 
 function obj:observe(now)
   local app, title = focused()
+  local idle = hs.host.idleTime()
+  local signal = self:signal()
   local away, awaySince = tracker.presence(self.state, now, {
-    idle = hs.host.idleTime(),
+    idle = idle,
     app = app,
     locked = self.locked,
     asleep = self.asleep,
+    working = signal ~= nil and signal.age <= self.rules.signalSeconds,
   })
   if away then
     return { away = true, awaySince = awaySince, app = app }
@@ -211,8 +214,9 @@ function obj:observe(now)
   local class, source = classify.decide(self.rules, {
     app = app,
     title = title,
+    idle = idle,
     cwd = cwdOf and cwdOf() or nil,
-    signal = self:signal(),
+    signal = signal,
     resolve = self.resolve,
   })
   return { class = class, source = source, app = app }

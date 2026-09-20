@@ -17,9 +17,12 @@ repository is found is tried in this order:
 
 1. the working directory the application reports (iTerm2 answers over
    AppleScript);
-2. a word in the window title that names a directory under one of the
+2. an absolute path in the window title, `~` included: an editor can be told
+   to put the active file's folder there, and then every window of it says
+   which repository it is in (see the README for the VS Code setting);
+3. a word in the window title that names a directory under one of the
    `repoRoots`;
-3. a recent note from a coding tool's hook ([ADR 0004](0004-a-tool-says-where-it-is-working.md)).
+4. a recent note from a coding tool's hook ([ADR 0004](0004-a-tool-says-where-it-is-working.md)).
 
 The remote is read from `.git/config` directly, with worktree and submodule
 pointers followed, so that thirty title words a minute do not start thirty git
