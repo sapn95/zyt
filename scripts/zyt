@@ -567,7 +567,12 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
         return None
     directory = state / "sessions"
     path = directory / f"{session}.json"
-    now = int(time.time()) if at is None else at
+    # The whole second is what the Spoon reads and what everything is dated by.
+    # Two hooks of one session can fall in the same second, though, and then the
+    # second cannot say which of them happened first: `order` is the same moment
+    # to the microsecond, and nothing but the merge below looks at it.
+    moment = time.time() if at is None else float(at)
+    now = int(moment)
     # Asked before the lock is taken. Git can sit out its whole timeout, and no
     # other session's merge should have to wait behind that.
     found = git_remote(cwd) if remote is UNKNOWN else remote
@@ -577,13 +582,16 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
         # that waited on git can arrive behind a later event of its own session.
         # So the merge decides and not the arrival: where the session is comes
         # from the newest event to have written, an older one only fills in what
-        # the note does not say yet, and neither timestamp goes backwards.
-        newer = now >= (before.get("at") or 0)
+        # the note does not say yet, and no timestamp goes backwards. A note
+        # written before there was an `order` is dated by its second.
+        sequence = before.get("order") or before.get("at") or 0
+        newer = moment >= sequence
         remembered = before.get("remote")
         note = write_note(
             path,
             {
                 "at": max(now, before.get("at") or 0),
+                "order": max(moment, sequence),
                 "promptAt": max(now if prompt else 0, before.get("promptAt") or 0) or None,
                 "source": source if newer else before.get("source"),
                 "cwd": cwd if newer else before.get("cwd"),
