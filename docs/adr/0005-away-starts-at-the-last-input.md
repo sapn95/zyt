@@ -18,7 +18,10 @@ in no row at all.
 
 Applications listed in `noIdleApps` are exempt: a call in Teams or Zoom is an
 hour of no input that is unmistakably work. While one of them is in front, idle
-time does not end the segment.
+time does not end the segment. The tracker also remembers the last moment it
+saw the person present, so when the call window closes and the focus lands on
+Outlook with forty-five idle minutes behind it, the segment ends at the end of
+the call and not at its start.
 
 ## What was rejected
 

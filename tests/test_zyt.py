@@ -170,6 +170,87 @@ class Rendering(unittest.TestCase):
         self.assertEqual(as_json["leftover"], 0)
 
 
+class Rules(unittest.TestCase):
+    def test_defaults_without_a_file_and_the_report_merged_over_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rules = zyt.load_rules(Path(tmp) / "missing.json")
+            self.assertEqual(rules["report"], zyt.REPORT_DEFAULTS)
+            path = Path(tmp) / "rules.json"
+            path.write_text(json.dumps({"report": {"latest": "18:00"}}))
+            rules = zyt.load_rules(path)
+            self.assertEqual(rules["report"]["latest"], "18:00")
+            self.assertEqual(rules["report"]["earliest"], "07:00")
+
+    def test_a_broken_file_is_a_message_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rules.json"
+            path.write_text("{not json")
+            with self.assertRaises(SystemExit):
+                zyt.load_rules(path)
+            path.write_text(json.dumps({"report": [1, 2]}))
+            with self.assertRaises(SystemExit):
+                zyt.load_rules(path)
+            path.write_text(json.dumps([]))
+            with self.assertRaises(SystemExit):
+                zyt.load_rules(path)
+
+
+class DayView(unittest.TestCase):
+    def test_a_single_day_has_its_own_title_and_no_week_leftover(self):
+        days = week(mon=480, sat=600)
+        blocks, booked, _ = zyt.propose(days, REPORT)
+        monday = dt.date(2026, 9, 14)
+        text = zyt.render_week(monday, {monday: days[monday]}, blocks, booked, None, "Monday 14.09.2026")
+        self.assertTrue(text.startswith("Monday 14.09.2026"))
+        self.assertNotIn("left over", text)
+        self.assertNotIn("Sat", text)
+        as_json = zyt.week_json({monday: days[monday]}, blocks, booked, None)
+        self.assertIsNone(as_json["leftover"])
+        self.assertEqual(list(as_json["days"]), ["2026-09-14"])
+
+    def test_the_totals_add_up_to_the_rows_in_whole_minutes(self):
+        days = week()
+        for i in range(5):
+            day = dt.date(2026, 9, 14) + dt.timedelta(days=i)
+            days[day]["work"] = 8 * 3600 + 50
+            days[day]["start"] = at(day.isoformat(), "08:00")
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        text = zyt.render_week(dt.date(2026, 9, 14), days, blocks, booked, leftover)
+        self.assertIn("recorded 40h00 work", text)
+        self.assertIn("booked 40h00", text)
+
+
+class ReportCommand(unittest.TestCase):
+    def test_week_and_day_run_end_to_end_on_a_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config = zyt.STATE, zyt.CONFIG
+            zyt.STATE = Path(tmp) / "state"
+            zyt.CONFIG = Path(tmp) / "rules.json"
+            zyt.STATE.mkdir()
+            (zyt.STATE / "intervals.csv").write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T08:00:00+02:00,2026-09-14T12:00:00+02:00,14400,work,app,Mail\n"
+                "2026-09-19T14:00:00+02:00,2026-09-19T15:00:00+02:00,3600,work,app,Mail\n"
+            )
+            out = zyt.sys.stdout
+            try:
+                zyt.sys.stdout = io.StringIO()
+                self.assertEqual(zyt.main(["week", "2026-W38"]), 0)
+                text = zyt.sys.stdout.getvalue()
+                self.assertIn("Week 2026-W38", text)
+                self.assertIn("recorded 5h00 work", text)
+                self.assertIn("booked 5h00", text)
+                zyt.sys.stdout = io.StringIO()
+                self.assertEqual(zyt.main(["day", "2026-09-14", "--json"]), 0)
+                data = json.loads(zyt.sys.stdout.getvalue())
+                self.assertEqual(list(data["days"]), ["2026-09-14"])
+                self.assertEqual(data["days"]["2026-09-14"]["booked"], 5 * 3600)
+                self.assertIsNone(data["leftover"])
+            finally:
+                zyt.sys.stdout = out
+                zyt.STATE, zyt.CONFIG = state, config
+
+
 class Intervals(unittest.TestCase):
     def test_rows_are_read_and_bad_ones_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -215,6 +296,7 @@ class Hook(unittest.TestCase):
 
     def test_the_hook_reads_the_cwd_from_stdin_and_prints_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
+            state = zyt.STATE
             zyt.STATE = Path(tmp) / "state"
             stdin, stdout = zyt.sys.stdin, zyt.sys.stdout
             zyt.sys.stdin = io.StringIO(json.dumps({"cwd": tmp, "hook_event_name": "UserPromptSubmit"}))
@@ -226,6 +308,7 @@ class Hook(unittest.TestCase):
                 zyt.sys.stdin, zyt.sys.stdout = stdin, stdout
             self.assertEqual(code, 0)
             self.assertEqual(json.loads((zyt.STATE / "context.json").read_text())["cwd"], tmp)
+            zyt.STATE = state
 
 
 if __name__ == "__main__":

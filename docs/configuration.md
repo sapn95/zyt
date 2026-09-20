@@ -9,7 +9,7 @@ run.
 | --- | --- | --- |
 | `defaultClass` | `"work"` | The class before anything has been decided ([ADR 0002](adr/0002-unknown-is-sticky-not-a-third-class.md)) |
 | `labels` | `{"work":"W","private":"P","away":"·"}` | What the menu-bar item shows; a pinned class is shown in brackets |
-| `tickSeconds` | `30` | How often the screen is looked at; a switch to another application is looked at at once |
+| `tickSeconds` | `30` | How often the screen is looked at; a switch to another application is looked at at once. Applied on **Reload the rules** |
 | `idleSeconds` | `600` | No input for this long ends the segment, backdated to the last input ([ADR 0005](adr/0005-away-starts-at-the-last-input.md)) |
 | `signalSeconds` | `300` | How long a coding tool's note counts ([ADR 0004](adr/0004-a-tool-says-where-it-is-working.md)) |
 | `noIdleApps` | `[]` | Applications in front of which idle time does not count: calls |
