@@ -1,0 +1,8 @@
+# The command line has no extension, so it has to be named here to be seen.
+extend-include = ["scripts/zyt"]
+# The python3 a Mac ships with, which is what the command line runs on.
+target-version = "py39"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]

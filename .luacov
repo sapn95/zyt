@@ -1,0 +1,10 @@
+return {
+  -- Only the modules that decide something. init.lua is the Hammerspoon
+  -- adapter: it cannot be loaded outside Hammerspoon, and counting it as
+  -- uncovered would put a permanent hole in a number that is supposed to mean
+  -- something. What it is allowed to contain instead is written down in
+  -- docs/adr/0001-a-pure-core-and-a-thin-shell.md.
+  include = { "Zyt%.spoon/zyt/" },
+  exclude = { "_spec$", "/luacov", "/busted", "/luassert" },
+  runreport = false,
+}
