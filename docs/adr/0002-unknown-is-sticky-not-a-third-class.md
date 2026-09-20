@@ -20,7 +20,8 @@ the rules file applies.
 The manual switch in the menu exists for when that inheritance is wrong. It
 pins the class until the next lock, because a lock is the natural end of a
 stretch of work, and a pin that outlived it would quietly misfile the next
-morning.
+morning. Setting or releasing the pin closes the running segment, so the rows
+say which minutes were decided by hand and which by the rules.
 
 ## What was rejected
 

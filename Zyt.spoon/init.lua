@@ -259,7 +259,15 @@ function obj:setOverride(class)
   if class ~= "work" and class ~= "private" then
     class = nil
   end
-  self.override = class
+  if class ~= self.override then
+    -- The pin, and its end, are boundaries: what came before was decided
+    -- one way, what follows is decided another, and the rows say which.
+    self.override = class
+    local closed = tracker.close(self.state, os.time())
+    if closed then
+      self:append(closed)
+    end
+  end
   self:tick()
   return self:statusJSON()
 end

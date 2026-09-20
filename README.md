@@ -58,7 +58,8 @@ Zoom is exempt ([ADR 0005](docs/adr/0005-away-starts-at-the-last-input.md)).
 A coding assistant works for minutes with nobody typing, in a window that does
 not name the repository. So the tool tells zyt: `zyt hook claude-code` on
 Claude Code's `UserPromptSubmit` and `PostToolUse` events leaves a note with
-the working directory and its remote, and the Spoon reads it while it is fresh
+the directory of the file the tool touched, or the working directory when
+there is none, and its git remote; the Spoon reads it while it is fresh
 ([ADR 0004](docs/adr/0004-a-tool-says-where-it-is-working.md)). Any other tool
 can leave the same note with `zyt context <name> <directory>`.
 
