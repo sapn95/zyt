@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -326,6 +327,63 @@ class Hook(unittest.TestCase):
                 chat = json.loads((zyt.STATE / "chat.json").read_text())
                 self.assertEqual(chat["session"], "b")
                 self.assertEqual(json.loads((zyt.STATE / "context.json").read_text())["session"], "b")
+                self.assertEqual(zyt.sys.stdout.getvalue(), "")
+            finally:
+                zyt.sys.stdin, zyt.sys.stdout = stdin, stdout
+                zyt.STATE = state
+
+    def test_a_session_note_remembers_the_repository_it_last_touched(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            first = zyt.write_session("claude-code", tmp, "abc", True, remote="git@host:me/one.git", state=state)
+            self.assertEqual(first["promptAt"], first["at"])
+            # a prompt in a folder full of checkouts resolves to nothing, and the
+            # repository this session is in is still the one it was in
+            later = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state)
+            self.assertEqual(later["remote"], "git@host:me/one.git")
+            # working is not talking: only a prompt moves promptAt
+            worked = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state)
+            self.assertEqual(worked["promptAt"], later["promptAt"])
+            self.assertEqual(json.loads((state / "sessions" / "abc.json").read_text()), worked)
+            self.assertFalse((state / "sessions" / "abc.json.tmp").exists())
+
+    def test_a_session_that_has_only_worked_is_no_chat(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            note = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=Path(tmp) / "state")
+            self.assertIsNone(note["promptAt"])
+
+    def test_a_session_id_that_is_not_a_file_name_is_not_written(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            for bad in (None, "", "../escape", "a/b", ".hidden", "x" * 200):
+                self.assertIsNone(zyt.write_session("claude-code", tmp, bad, True, remote=None, state=state))
+            self.assertFalse((state / "sessions").exists())
+
+    def test_notes_of_sessions_long_over_are_pruned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            zyt.write_session("claude-code", tmp, "old", True, remote=None, state=state)
+            stale = state / "sessions" / "old.json"
+            long_ago = time.time() - zyt.SESSION_TTL - 60
+            os.utime(stale, (long_ago, long_ago))
+            zyt.write_session("claude-code", tmp, "new", True, remote=None, state=state)
+            self.assertFalse(stale.exists())
+            self.assertTrue((state / "sessions" / "new.json").exists())
+
+    def test_the_hook_writes_one_note_per_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = zyt.STATE
+            zyt.STATE = Path(tmp) / "state"
+            stdin, stdout = zyt.sys.stdin, zyt.sys.stdout
+            try:
+                zyt.sys.stdout = io.StringIO()
+                for session in ("a", "b"):
+                    zyt.sys.stdin = io.StringIO(
+                        json.dumps({"cwd": tmp, "hook_event_name": "UserPromptSubmit", "session_id": session})
+                    )
+                    zyt.main(["hook", "claude-code"])
+                written = sorted(path.name for path in (zyt.STATE / "sessions").iterdir())
+                self.assertEqual(written, ["a.json", "b.json"])
                 self.assertEqual(zyt.sys.stdout.getvalue(), "")
             finally:
                 zyt.sys.stdin, zyt.sys.stdout = stdin, stdout

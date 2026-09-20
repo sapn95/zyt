@@ -33,9 +33,9 @@ the one the person is typing into. There is no way to see which chat panel is
 in front: the editor's accessibility tree does not expose it. So the hook
 writes a second note, `chat.json`, on every prompt the person submits. That
 is the chat they are talking to, and for the editor's windows it outranks
-the note of whatever session happens to be busy, for `chatSeconds`. Reading a
-second chat without typing into it is the one case this gets wrong, until the
-next prompt.
+the note of whatever session happens to be busy, for `chatSeconds`. What
+happens when several chats are open at once, and reading one is not typing into
+it, is [ADR 0010](0010-which-chat-of-several.md).
 
 The note does two more things while it is fresh. It keeps the person present:
 a session working for ten minutes with nobody typing is not a break, it is

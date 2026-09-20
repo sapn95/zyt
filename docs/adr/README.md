@@ -15,3 +15,4 @@ their idea was considered or simply missed.
 | [0007](0007-the-command-line-is-python.md) | The command line is Python, the Spoon is Lua |
 | [0008](0008-the-rules-stay-out-of-the-repository.md) | The rules stay out of the repository |
 | [0009](0009-ask-once-and-remember.md) | Ask once, and remember the answer |
+| [0010](0010-which-chat-of-several.md) | Which chat, out of the several open in one editor |
