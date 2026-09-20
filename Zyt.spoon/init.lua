@@ -148,6 +148,18 @@ function obj:loadRules()
   if self.state then
     self.state.rules = normalised
   end
+  if self.running then
+    self:armTimer()
+  end
+end
+
+function obj:armTimer()
+  if self.timer then
+    self.timer:stop()
+  end
+  self.timer = hs.timer.doEvery(self.rules.tickSeconds, function()
+    self:tick()
+  end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -183,10 +195,14 @@ end
 
 function obj:observe(now)
   local app, title = focused()
-  local idle = math.floor(hs.host.idleTime())
-  local away = self.locked or self.asleep or (idle >= self.rules.idleSeconds and not self.rules.noIdleApps[app])
+  local away, awaySince = tracker.presence(self.state, now, {
+    idle = hs.host.idleTime(),
+    app = app,
+    locked = self.locked,
+    asleep = self.asleep,
+  })
   if away then
-    return { away = true, awaySince = now - idle, app = app }
+    return { away = true, awaySince = awaySince, app = app }
   end
   if self.override then
     return { class = self.override, source = "manual", app = app }
@@ -283,8 +299,17 @@ function obj:today()
   local day = os.date("%Y-%m-%d", now)
   local sums = totals.forDay(self.rows, day)
   local open = self.state and self.state.open
-  if open and os.date("%Y-%m-%d", open.start) == day then
-    sums[open.class] = sums[open.class] + (now - open.start)
+  if open then
+    local midnight = os.time({
+      year = tonumber(day:sub(1, 4)),
+      month = tonumber(day:sub(6, 7)),
+      day = tonumber(day:sub(9, 10)),
+      hour = 0,
+    })
+    local from = math.max(open.start, midnight)
+    if now > from then
+      sums[open.class] = sums[open.class] + (now - from)
+    end
   end
   return sums
 end
@@ -315,7 +340,7 @@ end
 -- Menu
 
 function obj:copyReport()
-  local out, ok = hs.execute(self.cli .. " week 2>&1", true)
+  local out, ok = hs.execute(("%q week 2>&1"):format(self.cli), true)
   if ok then
     hs.pasteboard.setContents(out)
     hs.alert.show("zyt: this week's report is on the clipboard", 2)
@@ -462,9 +487,7 @@ function obj:start()
     return self:menu()
   end)
   self:watch()
-  self.timer = hs.timer.doEvery(self.rules.tickSeconds, function()
-    self:tick()
-  end)
+  self:armTimer()
   local previousShutdown = hs.shutdownCallback
   hs.shutdownCallback = function()
     if self.running then

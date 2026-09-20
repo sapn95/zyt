@@ -92,7 +92,9 @@ function M.normalise(raw, home)
     if type(root) ~= "string" or root == "" then
       return fail("repoRoots[%d] has to be a non-empty string", i)
     end
-    root = root:gsub("^~", home or "")
+    root = root:gsub("^~", function()
+      return home or ""
+    end)
     roots[i] = (root:gsub("/+$", ""))
   end
   rules.repoRoots = roots

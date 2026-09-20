@@ -75,6 +75,49 @@ describe("tracker.observe", function()
   end)
 end)
 
+describe("tracker.presence", function()
+  local function state(extra)
+    local r = { idleSeconds = 600, noIdleApps = { ["Microsoft Teams"] = true } }
+    for k, v in pairs(extra or {}) do
+      r[k] = v
+    end
+    return { rules = r }
+  end
+
+  it("is present while there is input, and remembers when", function()
+    local s = state()
+    assert.same({ false }, { tracker.presence(s, 1000, { idle = 5, app = "Mail" }) })
+    assert.equals(1000, s.presentUntil)
+  end)
+
+  it("is away from the last input once the idle threshold is passed", function()
+    local s = state()
+    tracker.presence(s, 1000, { idle = 5, app = "Mail" })
+    assert.same({ true, 1300 }, { tracker.presence(s, 2000, { idle = 700, app = "Mail" }) })
+  end)
+
+  it("counts a call as present although nobody typed", function()
+    local s = state()
+    assert.same({ false }, { tracker.presence(s, 2000, { idle = 1800, app = "Microsoft Teams" }) })
+    assert.equals(2000, s.presentUntil)
+  end)
+
+  it("ends the call where the call ended, not where it began", function()
+    local s = state()
+    tracker.presence(s, 1000, { idle = 0, app = "Microsoft Teams" })
+    tracker.presence(s, 2000, { idle = 1000, app = "Microsoft Teams" })
+    tracker.presence(s, 3700, { idle = 2700, app = "Microsoft Teams" })
+    -- the call window closes, focus lands on Outlook with 45 idle minutes behind it
+    assert.same({ true, 3700 }, { tracker.presence(s, 3710, { idle = 2710, app = "Microsoft Outlook" }) })
+  end)
+
+  it("is away when locked or asleep, whatever the idle time", function()
+    local s = state()
+    assert.same({ true, 990 }, { tracker.presence(s, 1000, { idle = 10, app = "Mail", locked = true }) })
+    assert.same({ true, 1000 }, { tracker.presence(s, 1000, { idle = 0, app = "Mail", asleep = true }) })
+  end)
+end)
+
 describe("tracker.close", function()
   it("closes at the given time, or at the last sighting", function()
     local s = fresh()

@@ -17,6 +17,23 @@ describe("totals", function()
     assert.same({ work = 0, private = 0 }, totals.forDay(totals.parse(nil), "2026-09-14"))
   end)
 
+  it("splits a row that runs past midnight between its two days", function()
+    local rows = totals.parse(table.concat({
+      "start,end,seconds,class,source,app",
+      "2026-09-19T23:30:00+02:00,2026-09-20T00:30:00+02:00,3600,work,app,Mail",
+      "2026-09-20T09:00:00+02:00,2026-09-20T09:10:00+02:00,600,private,app,Spotify",
+    }, "\n"))
+    assert.same({ work = 1800, private = 0 }, totals.forDay(rows, "2026-09-19"))
+    assert.same({ work = 1800, private = 600 }, totals.forDay(rows, "2026-09-20"))
+    assert.same({ work = 0, private = 0 }, totals.forDay(rows, "2026-09-21"))
+  end)
+
+  it("knows the day after, months and years included", function()
+    assert.equals("2026-10-01", totals.nextDay("2026-09-30"))
+    assert.equals("2027-01-01", totals.nextDay("2026-12-31"))
+    assert.is_nil(totals.nextDay("garbage"))
+  end)
+
   it("formats whole minutes", function()
     assert.equals("7h05", totals.format(25500))
     assert.equals("0h00", totals.format(59))
