@@ -25,6 +25,7 @@ W                          ← the menu-bar item: work is running
 ├─ ────────────
 ├─ Open the rules file
 ├─ Reload the rules
+├─ Forget the answers, ask again
 ├─ ────────────
 └─ Quit zyt
 ```
@@ -56,8 +57,12 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeFolderLong}"
    ```
 
-5. **Otherwise, what was already running.** A Finder window does not change
-   whose time it is ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md)).
+5. **Otherwise it asks, once.** A small panel under the menu bar: Work,
+   Private, or Don't ask. The answer is kept for that repository or that
+   application and never asked again; until it is answered, and for a Finder
+   window you told it not to ask about, what was already running keeps running
+   ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md),
+   [ADR 0009](docs/adr/0009-ask-once-and-remember.md)).
 
 A lock, sleep, or ten minutes without input end the segment, backdated to the
 last keystroke so the idle minutes are in no row at all. A call in Teams or

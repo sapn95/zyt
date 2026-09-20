@@ -1,0 +1,31 @@
+local learned = require("zyt.learned")
+
+describe("learned", function()
+  it("files a question under the repository, else the application", function()
+    assert.equals("remote:git@github.com:me/budget.git", learned.key("git@github.com:me/budget.git", "Code"))
+    assert.equals("app:Finder", learned.key(nil, "Finder"))
+    assert.is_nil(learned.key(nil, ""))
+    assert.is_nil(learned.key(nil, nil))
+  end)
+
+  it("remembers the three answers and nothing else", function()
+    local store = {}
+    learned.remember(store, "app:Finder", "inherit")
+    learned.remember(store, "remote:x", "work")
+    learned.remember(store, "remote:y", "sometimes")
+    learned.remember(store, nil, "work")
+    assert.same({ ["app:Finder"] = "inherit", ["remote:x"] = "work" }, store)
+    assert.equals("work", learned.lookup(store, "remote:x"))
+    assert.equals("inherit", learned.lookup(store, "app:Finder"))
+    assert.is_nil(learned.lookup(store, "remote:y"))
+    assert.is_nil(learned.lookup(store, nil))
+    assert.is_nil(learned.lookup({ ["app:X"] = "garbage" }, "app:X"))
+  end)
+
+  it("asks again only after the cooldown", function()
+    local asked = { ["app:Finder"] = 1000 }
+    assert.is_true(learned.due(asked, "app:Mail", 1001, 1800))
+    assert.is_false(learned.due(asked, "app:Finder", 2000, 1800))
+    assert.is_true(learned.due(asked, "app:Finder", 2800, 1800))
+  end)
+end)

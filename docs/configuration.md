@@ -17,6 +17,7 @@ run.
 | `remotes` | `[]` | `{"match": "<substring of the remote URL>", "class": "work"\|"private"}`, first match wins |
 | `apps` | `{}` | Application name to `"work"`, `"private"` or `"repo"` |
 | `titles` | `[]` | `{"contains": "<text>", "class": …}`, case-insensitive, first match wins |
+| `prompt` | `{"enabled": true, "seconds": 20, "cooldownSeconds": 1800}` | The panel that asks when nothing else knows: whether, how long it stays, how long before an unanswered question is asked again ([ADR 0009](adr/0009-ask-once-and-remember.md)) |
 | `report` | see below | The booking rules |
 
 ## How a moment is classified
@@ -31,7 +32,9 @@ run.
    written from inside that same application, in that order
    ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
 5. The first `titles` rule whose text is in the window title.
-6. Otherwise the class that was already running.
+6. An answer given earlier for this repository or application.
+7. Otherwise the class that was already running, and a question if none has
+   been asked about this repository or application lately.
 
 ## `report`
 
@@ -56,6 +59,7 @@ How these turn a recorded week into a proposal is in
 | `~/.local/state/zyt/intervals.csv` | One row per segment: `start,end,seconds,class,source,app` |
 | `~/.local/state/zyt/open.json` | The segment running now, rewritten every tick so a crash loses at most one tick |
 | `~/.local/state/zyt/context.json` | The last note a coding tool left |
+| `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
 
 `$XDG_STATE_HOME` moves the state directory. Timestamps are local time with
 the offset written out, so a week spanning a clock change still adds up.
