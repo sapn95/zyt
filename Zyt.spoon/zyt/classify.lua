@@ -79,7 +79,7 @@ local function byRepository(rules, obs)
     end
   end
   local signal = obs.signal
-  if fresh(rules, signal) then
+  if fresh(rules, signal) and (signal.bundle == nil or signal.bundle == obs.bundle) then
     local class = M.remoteClass(rules, signal.remote)
     if class then
       return class, "llm"
@@ -100,6 +100,7 @@ end
 
 --- Decide for one observation:
 ---   obs.app      the frontmost application's name
+---   obs.bundle   its bundle id, matched against the one a tool's note names
 ---   obs.title    the focused window's title
 ---   obs.cwd      the working directory the application reported, if it can
 ---   obs.idle     seconds since the last input
@@ -109,7 +110,9 @@ end
 ---
 --- While nobody has typed for `idleSeconds` and a coding tool has reported in
 --- recently, the tool's repository decides: the window in front is whatever
---- was left there, and the work is happening in the session.
+--- was left there, and the work is happening in the session. While somebody
+--- is typing, the note only speaks for the application hosting the tool: a
+--- second editor open on another repository is not the session's business.
 function M.decide(rules, obs)
   if type(obs.idle) == "number" and obs.idle >= rules.idleSeconds and fresh(rules, obs.signal) then
     local class = M.remoteClass(rules, obs.signal.remote)

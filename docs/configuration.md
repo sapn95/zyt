@@ -27,8 +27,9 @@ run.
 3. `apps[<frontmost application>]` when it is `work` or `private`.
 4. For an application marked `repo`: the remote of the repository it is in,
    found from its working directory, from an absolute path in its title, from
-   a word in its title that names a checkout, or from a recent tool note, in
-   that order ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
+   a word in its title that names a checkout, or from a recent tool note
+   written from inside that same application, in that order
+   ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
 5. The first `titles` rule whose text is in the window title.
 6. Otherwise the class that was already running.
 
