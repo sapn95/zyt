@@ -73,6 +73,28 @@ describe("classify.decide", function()
       assert.same({ "private", "llm" }, { decide({ app = "Code", title = "git", signal = signal }) })
     end)
 
+    it("trusts the chat the person talks to over whatever session is busy", function()
+      local busy = { age = 10, remote = "git@github.com:me/budget.git", bundle = "com.microsoft.VSCode" }
+      local talking =
+        { age = 900, remote = "ssh://git@git.example.com:7999/team/infra.git", bundle = "com.microsoft.VSCode" }
+      assert.same(
+        { "work", "chat" },
+        { decide({ app = "Code", bundle = "com.microsoft.VSCode", title = "git", signal = busy, chat = talking }) }
+      )
+      -- a chat from another editor, or one from too long ago, does not count
+      talking.bundle = "dev.kiro.desktop"
+      assert.same(
+        { "private", "llm" },
+        { decide({ app = "Code", bundle = "com.microsoft.VSCode", title = "git", signal = busy, chat = talking }) }
+      )
+      talking.bundle = "com.microsoft.VSCode"
+      talking.age = 99999
+      assert.same(
+        { "private", "llm" },
+        { decide({ app = "Code", bundle = "com.microsoft.VSCode", title = "git", signal = busy, chat = talking }) }
+      )
+    end)
+
     it("applies the note to the application that wrote it and to no other", function()
       local signal = { age = 60, remote = "git@github.com:me/budget.git", bundle = "com.microsoft.VSCode" }
       assert.same(

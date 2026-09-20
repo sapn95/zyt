@@ -28,6 +28,15 @@ The hook prints nothing. Anything a `UserPromptSubmit` hook writes to standard
 output is handed to the model as context, and a time tracker has no business
 there.
 
+Several sessions can run at once, in the same editor, and only one of them is
+the one the person is typing into. There is no way to see which chat panel is
+in front: the editor's accessibility tree does not expose it. So the hook
+writes a second note, `chat.json`, on every prompt the person submits. That
+is the chat they are talking to, and for the editor's windows it outranks
+the note of whatever session happens to be busy, for `chatSeconds`. Reading a
+second chat without typing into it is the one case this gets wrong, until the
+next prompt.
+
 The note does two more things while it is fresh. It keeps the person present:
 a session working for ten minutes with nobody typing is not a break, it is
 being read. And once nobody has typed for `idleSeconds`, the note's repository

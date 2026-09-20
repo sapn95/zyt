@@ -456,7 +456,7 @@ def git_remote(cwd: str):
     return done.stdout.strip() or None
 
 
-def write_context(source: str, cwd: str, state=None) -> dict:
+def write_context(source: str, cwd: str, state=None, name: str = "context", session=None) -> dict:
     """Leave a note for the Spoon: which directory a tool is working in, and
     which remote that belongs to. Written whole, then renamed, so the Spoon
     never reads half a file."""
@@ -470,11 +470,12 @@ def write_context(source: str, cwd: str, state=None) -> dict:
         # knows which editor or terminal is hosting the session. The Spoon
         # applies the note to that application's windows and to no other's.
         "bundle": os.environ.get("__CFBundleIdentifier"),
+        "session": session,
     }
     state.mkdir(parents=True, exist_ok=True)
-    temporary = state / "context.json.tmp"
+    temporary = state / f"{name}.json.tmp"
     temporary.write_text(json.dumps(note))
-    temporary.replace(state / "context.json")
+    temporary.replace(state / f"{name}.json")
     return note
 
 
@@ -506,7 +507,14 @@ def cmd_hook(args) -> int:
         payload = json.load(sys.stdin)
     except ValueError:
         payload = {}
-    write_context(args.tool, hook_directory(payload))
+    where = hook_directory(payload)
+    session = payload.get("session_id") if isinstance(payload, dict) else None
+    write_context(args.tool, where, session=session)
+    # A prompt is the person talking to this chat. Several sessions can be
+    # working at once, and only one of them is the one being typed into; the
+    # Spoon uses this second note to classify the editor's window.
+    if isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit":
+        write_context(args.tool, where, name="chat", session=session)
     return 0
 
 
