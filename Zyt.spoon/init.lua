@@ -221,7 +221,13 @@ function obj:note(name)
   if not decoded or type(decoded.at) ~= "number" then
     return nil
   end
-  return { age = os.time() - decoded.at, remote = decoded.remote, source = decoded.source, bundle = decoded.bundle }
+  return {
+    age = os.time() - decoded.at,
+    at = decoded.at,
+    remote = decoded.remote,
+    source = decoded.source,
+    bundle = decoded.bundle,
+  }
 end
 
 --- The last note any tool left: what some session is working on right now.
@@ -238,27 +244,42 @@ end
 --- first. A session that has only ever worked is not a chat anybody is looking
 --- at and has no `promptAt`, so it is left out here; the busy sessions are what
 --- `signal` is for.
+---
+--- The shared note counts too, for as long as nothing hosted in the same
+--- application has spoken: a prompt that carries no session id of its own
+--- leaves only that one, and dropping it would hand the window to some other
+--- application's session.
 function obj:chats()
   local directory = self.statePath .. "/sessions"
   local out = {}
-  local ok, iterator = pcall(hs.fs.dir, directory)
-  if not ok or not iterator then
-    return out
-  end
   local now = os.time()
-  for name in iterator do
-    if name:sub(-5) == ".json" then
-      local decoded = readJSON(directory .. "/" .. name)
-      if decoded and type(decoded.promptAt) == "number" then
-        out[#out + 1] = {
-          age = now - decoded.promptAt,
-          promptAt = decoded.promptAt,
-          remote = decoded.remote,
-          source = decoded.source,
-          bundle = decoded.bundle,
-          session = decoded.session,
-        }
+  local ok, iterator = pcall(hs.fs.dir, directory)
+  if ok and iterator then
+    for name in iterator do
+      if name:sub(-5) == ".json" then
+        local decoded = readJSON(directory .. "/" .. name)
+        if decoded and type(decoded.promptAt) == "number" then
+          out[#out + 1] = {
+            age = now - decoded.promptAt,
+            promptAt = decoded.promptAt,
+            remote = decoded.remote,
+            source = decoded.source,
+            bundle = decoded.bundle,
+            session = decoded.session,
+          }
+        end
       end
+    end
+  end
+  local shared = self:chat()
+  if shared then
+    local spokenFor = false
+    for _, chat in ipairs(out) do
+      spokenFor = spokenFor or chat.bundle == shared.bundle
+    end
+    if not spokenFor then
+      shared.promptAt = shared.at
+      out[#out + 1] = shared
     end
   end
   table.sort(out, function(a, b)
@@ -286,12 +307,6 @@ function obj:observe(now)
   end
   local cwdOf = self.cwdOf[app]
   local chats = self:chats()
-  if #chats == 0 then
-    -- Nothing has written a session note yet: fall back on the single note an
-    -- older hook left behind.
-    local chat = self:chat()
-    chats = chat and { chat } or {}
-  end
   local obs = {
     app = app,
     bundle = bundle,

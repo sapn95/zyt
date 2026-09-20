@@ -293,7 +293,7 @@ class Hook(unittest.TestCase):
             self.assertEqual(written["source"], "claude-code")
             self.assertEqual(written["cwd"], tmp)
             self.assertIsNone(written["remote"])
-            self.assertFalse((state / "context.json.tmp").exists())
+            self.assertEqual([path.name for path in state.iterdir()], ["context.json"])
 
     def test_the_note_names_the_application_hosting_the_tool(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -345,7 +345,7 @@ class Hook(unittest.TestCase):
             worked = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state)
             self.assertEqual(worked["promptAt"], later["promptAt"])
             self.assertEqual(json.loads((state / "sessions" / "abc.json").read_text()), worked)
-            self.assertFalse((state / "sessions" / "abc.json.tmp").exists())
+            self.assertEqual([path.name for path in (state / "sessions").iterdir()], ["abc.json"])
 
     def test_a_session_that_has_only_worked_is_no_chat(self):
         with tempfile.TemporaryDirectory() as tmp:

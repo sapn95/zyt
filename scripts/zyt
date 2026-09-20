@@ -469,9 +469,12 @@ def git_remote(cwd: str):
 
 
 def write_note(path: Path, note: dict) -> dict:
-    """Written whole, then renamed, so the Spoon never reads half a file."""
+    """Written whole, then renamed, so the Spoon never reads half a file. The
+    temporary carries the writer's process id: hooks run concurrently, and two
+    of them sharing one temporary would have the first one renamed away under
+    the second, which then loses its note to an error."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.parent / (path.name + ".tmp")
+    temporary = path.parent / f"{path.name}.{os.getpid()}.tmp"
     temporary.write_text(json.dumps(note))
     temporary.replace(path)
     return note
