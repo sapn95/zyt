@@ -51,7 +51,8 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
 
 A lock, sleep, or ten minutes without input end the segment, backdated to the
 last keystroke so the idle minutes are in no row at all. A call in Teams or
-Zoom is exempt ([ADR 0005](docs/adr/0005-away-starts-at-the-last-input.md)).
+Zoom is exempt, and stays counted when the focus moves on after it
+([ADR 0005](docs/adr/0005-away-starts-at-the-last-input.md)).
 
 ## Coding tools say where they are
 
@@ -105,7 +106,7 @@ Hammerspoon has to be running, with `hs.ipc` loaded for the command line.
 ```sh
 git clone https://github.com/sapn95/zyt.git ~/git/zyt
 ~/git/zyt/scripts/zyt link            # symlinks the Spoon, prints the init.lua line
-cp ~/git/zyt/examples/rules.json ~/.config/zyt/rules.json
+mkdir -p ~/.config/zyt && cp ~/git/zyt/examples/rules.json ~/.config/zyt/rules.json
 ```
 
 Add `hs.loadSpoon("Zyt"):start()` to `~/.hammerspoon/init.lua`, reload
@@ -118,7 +119,9 @@ lists every key), then:
 
 Or through Homebrew, which puts `zyt` on the PATH:
 `brew tap sapn95/zyt https://github.com/sapn95/zyt.git && brew install --HEAD sapn95/zyt/zyt`,
-then `zyt link` as above.
+then `zyt link` as above. While the repository is private the tap URL and the
+formula's `head` are the SSH form, `ssh://git@github.com/sapn95/zyt.git`, and
+the install needs a GitHub SSH key.
 
 Window titles need Hammerspoon to have Accessibility permission; the doctor
 says whether it does.

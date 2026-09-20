@@ -30,10 +30,10 @@ function M.tokens(title)
   local out = {}
   for word in (title or ""):gmatch("%S+") do
     for part in word:gmatch("[^/:]+") do
-      part = part:gsub("^[^%w_]+", "")
-      part = part:gsub("[^%w_]+$", "")
-      if #part >= 2 then
-        out[#out + 1] = part
+      local trimmed = part:gsub("^[^%w_]+", "")
+      trimmed = trimmed:gsub("[^%w_]+$", "")
+      if #trimmed >= 2 then
+        out[#out + 1] = trimmed
       end
     end
   end

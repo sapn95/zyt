@@ -26,7 +26,32 @@ function M.csv(row)
 end
 
 function M.new(rules, clock)
-  return { rules = rules, clock = clock, open = nil, last = nil }
+  return { rules = rules, clock = clock, open = nil, last = nil, presentUntil = nil }
+end
+
+--- Whether anybody is here, and since when not.
+---   obs.idle    seconds since the last input
+---   obs.app     the frontmost application
+---   obs.locked  the screen is locked
+---   obs.asleep  the machine is asleep
+--- Idle time counts from the last input, but time in front of an application
+--- in `noIdleApps` counts as present, so a call that ends with the focus
+--- elsewhere is not wiped out by the idle minutes it contained: away starts
+--- at the last input or at the last moment the person was seen present,
+--- whichever is later.
+function M.presence(state, now, obs)
+  local rules = state.rules
+  local idle = math.floor(obs.idle or 0)
+  local idleAway = idle >= rules.idleSeconds and not rules.noIdleApps[obs.app or ""]
+  if not (obs.locked or obs.asleep or idleAway) then
+    state.presentUntil = now
+    return false, nil
+  end
+  local since = now - idle
+  if state.presentUntil and state.presentUntil > since then
+    since = state.presentUntil
+  end
+  return true, math.min(since, now)
 end
 
 local function row(state, segment, finish)

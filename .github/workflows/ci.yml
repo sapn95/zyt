@@ -87,9 +87,12 @@ jobs:
         run: |
           luacov
           lua scripts/coverage-floor.lua
+      - uses: actions/setup-python@v6
+        with:
+          # The python3 a Mac ships with. The command line may need nothing
+          # newer, and nothing beyond the standard library.
+          python-version: "3.9"
       - name: python
-        # The command line runs on the python3 a Mac ships with, so nothing in
-        # it may need more than the standard library.
         run: python3 -m unittest discover -s tests -v
 
   workflows:

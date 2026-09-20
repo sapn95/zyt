@@ -46,15 +46,23 @@ CHUNK_MINUTES = 15
 # Rules
 
 
-def load_rules(path: Path = CONFIG) -> dict:
+def load_rules(path=None) -> dict:
+    path = path or CONFIG
     try:
         rules = json.loads(path.read_text())
     except FileNotFoundError:
         rules = {}
+    except ValueError as error:
+        raise SystemExit(f"{path}: the rules file is not valid JSON: {error}") from None
     if not isinstance(rules, dict):
         raise SystemExit(f"{path}: the rules file has to hold a JSON object")
+    given = rules.get("report")
+    if given is None:
+        given = {}
+    if not isinstance(given, dict):
+        raise SystemExit(f"{path}: report has to be a JSON object")
     report = dict(REPORT_DEFAULTS)
-    report.update(rules.get("report") or {})
+    report.update(given)
     rules["report"] = report
     return rules
 
@@ -241,12 +249,15 @@ def booking_of(day: dt.date, summary: dict, blocks: dict) -> str:
     return "moved to the workdays" if summary["work"] else "-"
 
 
-def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftover: int) -> str:
+def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftover, title=None) -> str:
+    """The record on the left, the proposal on the right. Every figure is in
+    whole minutes per day, the totals included, so the footer adds up to the
+    rows above it. `leftover` is None for a single day: it belongs to the week."""
     sunday = monday + dt.timedelta(days=6)
     bookings = {day: booking_of(day, days[day], blocks) for day in days}
     width = max(len(text) for text in bookings.values()) + 2
     lines = [
-        f"Week {week_of(monday)}  {monday:%d.%m.} to {sunday:%d.%m.%Y}",
+        title or f"Week {week_of(monday)}  {monday:%d.%m.} to {sunday:%d.%m.%Y}",
         "",
         f"{'':11}{'recorded':<36}  {'proposal'}",
         f"{'day':<11}{'start':<7}{'end':<7}{'work':<7}{'private':<9}{'break':<6}  {'booking':<{width}}{'booked'}",
@@ -254,8 +265,8 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
     total_work = total_private = total_booked = 0
     for day in sorted(days):
         summary = days[day]
-        total_work += summary["work"]
-        total_private += summary["private"]
+        total_work += summary["work"] // 60
+        total_private += summary["private"] // 60
         amount = "-"
         if day in blocks:
             amount = fmt_m(booked[day])
@@ -266,10 +277,10 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
             f"{bookings[day]:<{width}}{amount}"
         )
     lines.append("")
-    lines.append(
-        f"recorded {fmt_h(total_work)} work, {fmt_h(total_private)} private  ·  "
-        f"booked {fmt_m(total_booked)}  ·  left over {fmt_m(leftover)}"
-    )
+    footer = f"recorded {fmt_m(total_work)} work, {fmt_m(total_private)} private  ·  booked {fmt_m(total_booked)}"
+    if leftover is not None:
+        footer += f"  ·  left over {fmt_m(leftover)}"
+    lines.append(footer)
     return "\n".join(lines)
 
 
@@ -287,7 +298,7 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
             }
             for day, summary in sorted(days.items())
         },
-        "leftover": leftover * 60,
+        "leftover": leftover * 60 if leftover is not None else None,
     }
 
 
@@ -299,10 +310,20 @@ def hs_binary() -> str:
     return shutil.which("hs") or HS_IN_APP
 
 
+def hammerspoon_running() -> bool:
+    try:
+        return subprocess.run(["pgrep", "-x", "Hammerspoon"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def hs_call(lua: str, timeout: float = 8.0):
-    """Run Lua inside Hammerspoon and return its last line, or None when it does
-    not answer. `-A` on every call: without it the client asks LaunchServices
-    whether Hammerspoon is running and can hang in a dialog nobody sees."""
+    """Run Lua inside Hammerspoon and return its last line, or None when it is
+    not running or does not answer. The running check comes first: `hs -A`
+    would start Hammerspoon when it is down, and without `-A` the client stops
+    in a prompt nobody sees. Neither is what a status command should do."""
+    if not hammerspoon_running():
+        return None
     try:
         done = subprocess.run([hs_binary(), "-A", "-c", lua], capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired):
@@ -355,6 +376,9 @@ def cmd_link(_args) -> int:
     SPOONS.mkdir(parents=True, exist_ok=True)
     target = SPOONS / "Zyt.spoon"
     source = spoon_source()
+    if target.is_dir() and not target.is_symlink():
+        print(f"{target} is a real directory, not a link; move it aside first", file=sys.stderr)
+        return 1
     if target.is_symlink() or target.exists():
         target.unlink()
     target.symlink_to(source)
@@ -410,12 +434,15 @@ def cmd_report(args) -> int:
         monday = parse_week(args.when) if args.when else dt.date.today() - dt.timedelta(days=dt.date.today().weekday())
     days = week_days(read_intervals(STATE / "intervals.csv"), monday)
     blocks, booked, leftover = propose(days, rules["report"])
+    title = None
     if args.command == "day":
         days = {day: days[day]}
+        leftover = None
+        title = f"{day:%A %d.%m.%Y}  (week {week_of(day)})"
     if args.json:
         print(json.dumps(week_json(days, blocks, booked, leftover), indent=2))
     else:
-        print(render_week(monday, days, blocks, booked, leftover))
+        print(render_week(monday, days, blocks, booked, leftover, title))
     return 0
 
 
@@ -490,23 +517,25 @@ def cmd_doctor(_args) -> int:
         print(f"[{mark}] {text}")
 
     say(Path("/Applications/Hammerspoon.app").exists(), "Hammerspoon is installed")
-    up = hs_call("return 'up'") == "up"
-    say(
-        up,
-        "Hammerspoon answers over ipc"
-        if up
-        else "Hammerspoon does not answer over ipc (is it running, is hs.ipc loaded?)",
-    )
+    running = hammerspoon_running()
+    say(running, "Hammerspoon is running" if running else "Hammerspoon is not running")
+    up = running and hs_call("return 'up'") == "up"
+    if running:
+        say(up, "Hammerspoon answers over ipc" if up else "Hammerspoon does not answer over ipc (is hs.ipc loaded?)")
     if up:
         say(
             hs_call("return tostring(hs.accessibilityState())") == "true",
             "Hammerspoon has Accessibility (window titles need it)",
         )
-        running = hs_call("return tostring(_G.zyt and _G.zyt.running)") == "true"
-        say(running, "the Spoon is running" if running else f"the Spoon is not running: is `{LOAD_LINE}` in init.lua?")
-        if running:
+        spoon_up = hs_call("return tostring(_G.zyt and _G.zyt.running)") == "true"
+        say(
+            spoon_up, "the Spoon is running" if spoon_up else f"the Spoon is not running: is `{LOAD_LINE}` in init.lua?"
+        )
+        if spoon_up:
             age = hs_call("return tostring(_G.zyt.state.open and (os.time() - _G.zyt.state.open.lastSeen) or 'closed')")
-            if age == "closed":
+            if age is None or not age.lstrip("-").isdigit() and age != "closed":
+                say(False, f"could not read the last tick from the Spoon: {age}")
+            elif age == "closed":
                 say(None, "no segment is open right now (away, or the rules see nothing)")
             else:
                 say(int(age) < 120, f"the last tick was {age}s ago")
