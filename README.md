@@ -46,12 +46,23 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    tool left behind ([ADR 0003](docs/adr/0003-a-terminal-belongs-to-its-remote.md)).
 4. **The title.** `Jira` and `Confluence` are work, `GitHub` is not, whatever
    the browser.
+
+   An editor opened on a folder full of checkouts says nothing useful in its
+   title by default. VS Code, and editors built on it such as Kiro, can be told
+   to name the active file's folder, and then every window of them is
+   classified from the repository that folder is in:
+
+   ```json
+   "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeFolderLong}"
+   ```
 5. **Otherwise, what was already running.** A Finder window does not change
    whose time it is ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md)).
 
 A lock, sleep, or ten minutes without input end the segment, backdated to the
 last keystroke so the idle minutes are in no row at all. A call in Teams or
-Zoom is exempt, and stays counted when the focus moves on after it
+Zoom is exempt, and so is a coding tool working on your behalf: while it keeps
+reporting in, you are present, and its repository decides whose time it is
+even if the window in front is Spotify. A lock ends that too
 ([ADR 0005](docs/adr/0005-away-starts-at-the-last-input.md)).
 
 ## Coding tools say where they are

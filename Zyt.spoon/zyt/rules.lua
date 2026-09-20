@@ -104,6 +104,7 @@ function M.normalise(raw, home)
     noIdle[app] = true
   end
   rules.noIdleApps = noIdle
+  rules.home = home or ""
 
   return rules
 end

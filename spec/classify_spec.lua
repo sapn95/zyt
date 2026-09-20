@@ -2,7 +2,7 @@ local classify = require("zyt.classify")
 local rules = require("zyt.rules")
 
 local R = assert(rules.normalise({
-  apps = { Mail = "work", Spotify = "private", iTerm2 = "repo", Code = "repo" },
+  apps = { Mail = "work", Spotify = "private", iTerm2 = "repo", Code = "repo", Kiro = "repo" },
   titles = { { contains = "jira", class = "work" }, { contains = "GitHub", class = "private" } },
   remotes = { { match = "git.example.com", class = "work" }, { match = "github.com", class = "private" } },
   repoRoots = { "~/git" },
@@ -13,8 +13,14 @@ local remotes = {
   ["/Users/me/git/infra"] = "ssh://git@git.example.com:7999/team/infra.git",
   ["/Users/me/git/budget"] = "git@github.com:me/budget.git",
 }
+-- Like repo.resolver: any path inside a repository answers with its remote.
 local function resolve(path)
-  return remotes[path]
+  for prefix, remote in pairs(remotes) do
+    if path == prefix or path:sub(1, #prefix + 1) == prefix .. "/" then
+      return remote
+    end
+  end
+  return nil
 end
 
 local function decide(obs)
@@ -48,7 +54,18 @@ describe("classify.decide", function()
         { "private", "repo" },
         { decide({ app = "Code", title = "● main.go — budget — Visual Studio Code" }) }
       )
-      assert.same({ "work", "repo" }, { decide({ app = "iTerm2", title = "me@mac: ~/git/infra" }) })
+      -- a path in the title is read as a path, before any word is tried as a name
+      assert.same({ "work", "path" }, { decide({ app = "iTerm2", title = "me@mac: ~/git/infra" }) })
+      assert.same({ "work", "repo" }, { decide({ app = "iTerm2", title = "me@mac: infra (zsh)" }) })
+    end)
+
+    it("reads an absolute path out of the title, with ~ expanded", function()
+      assert.same(
+        { "work", "path" },
+        { decide({ app = "Code", title = "● main.tf — git — /Users/me/git/infra/stacks/prod" }) }
+      )
+      assert.same({ "private", "path" }, { decide({ app = "Kiro", title = "notes.md — ~/git/budget/docs" }) })
+      assert.is_nil(decide({ app = "Code", title = "readme — /Users/me/elsewhere/file" }))
     end)
 
     it("falls back to a recent note from a tool", function()
@@ -59,6 +76,24 @@ describe("classify.decide", function()
     it("ignores a stale note", function()
       local signal = { age = 301, remote = "git@github.com:me/budget.git" }
       assert.is_nil(decide({ app = "Code", title = "git", signal = signal }))
+    end)
+
+    it("lets the tool's repository decide while nobody is typing", function()
+      local signal = { age = 30, remote = "ssh://git@git.example.com:7999/team/infra.git" }
+      -- Spotify is private by its own rule, but nobody has touched the machine
+      -- for a while and a session is working in the work repository.
+      assert.same({ "work", "llm" }, { decide({ app = "Spotify", title = "", idle = 900, signal = signal }) })
+      -- typing again: the window in front decides
+      assert.same({ "private", "app" }, { decide({ app = "Spotify", title = "", idle = 3, signal = signal }) })
+      -- a stale note, or one without a known remote, changes nothing
+      assert.same(
+        { "private", "app" },
+        { decide({ app = "Spotify", title = "", idle = 900, signal = { age = 999, remote = signal.remote } }) }
+      )
+      assert.same(
+        { "private", "app" },
+        { decide({ app = "Spotify", title = "", idle = 900, signal = { age = 30, remote = nil } }) }
+      )
     end)
 
     it("still reads the title rules when no repository is found", function()
@@ -75,6 +110,17 @@ describe("classify.tokens", function()
     )
     assert.same({ "me@mac", "git", "infra" }, classify.tokens("me@mac: ~/git/infra"))
     assert.same({}, classify.tokens(nil))
+  end)
+end)
+
+describe("classify.paths", function()
+  it("finds every absolute path and expands the home directory", function()
+    assert.same(
+      { "/Users/me/git/infra/stacks", "/Users/me/git/budget" },
+      classify.paths("a — /Users/me/git/infra/stacks — ~/git/budget", "/Users/me")
+    )
+    assert.same({}, classify.paths("no path here", "/Users/me"))
+    assert.same({}, classify.paths(nil, "/Users/me"))
   end)
 end)
 

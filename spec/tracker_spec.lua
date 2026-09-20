@@ -111,6 +111,18 @@ describe("tracker.presence", function()
     assert.same({ true, 3700 }, { tracker.presence(s, 3710, { idle = 2710, app = "Microsoft Outlook" }) })
   end)
 
+  it("stays present while a coding tool is working, until the screen locks", function()
+    local s = state()
+    tracker.presence(s, 1000, { idle = 0, app = "Code" })
+    assert.same({ false }, { tracker.presence(s, 2000, { idle = 1000, app = "Code", working = true }) })
+    assert.equals(2000, s.presentUntil)
+    assert.same(
+      { true, 2000 },
+      { tracker.presence(s, 2100, { idle = 1100, app = "Code", working = true, locked = true }) }
+    )
+    assert.same({ true, 2000 }, { tracker.presence(s, 2200, { idle = 1200, app = "Code" }) })
+  end)
+
   it("is away when locked or asleep, whatever the idle time", function()
     local s = state()
     assert.same({ true, 990 }, { tracker.presence(s, 1000, { idle = 10, app = "Mail", locked = true }) })
