@@ -131,6 +131,23 @@ describe("classify.decide", function()
       assert.same({ "work", "chat" }, { decide(obs) })
     end)
 
+    it("stays in the newest chat even when it is the one nothing is known about", function()
+      local unknown =
+        { age = 60, promptAt = 200, session = "u", remote = "git@example.org:me/elsewhere.git", bundle = "b" }
+      local known = {
+        age = 300,
+        promptAt = 100,
+        session = "k",
+        remote = "ssh://git@git.example.com:7999/team/infra.git",
+        bundle = "b",
+      }
+      local obs = { app = "Code", bundle = "b", title = "git", chats = { unknown, known }, resolve = resolve }
+      -- the older chat's class is not borrowed: the question to ask is about
+      -- the repository the person is in, and that answer keeps
+      assert.equal("git@example.org:me/elsewhere.git", (classify.repositoryOf(R, obs)))
+      assert.is_nil(decide(obs))
+    end)
+
     it("offers as candidates only the chats the rules have a class for", function()
       local chats = {
         { age = 1, promptAt = 3, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
