@@ -294,6 +294,19 @@ class Hook(unittest.TestCase):
             self.assertIsNone(written["remote"])
             self.assertFalse((state / "context.json.tmp").exists())
 
+    def test_the_note_names_the_application_hosting_the_tool(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            before = os.environ.get("__CFBundleIdentifier")
+            os.environ["__CFBundleIdentifier"] = "com.example.Editor"
+            try:
+                note = zyt.write_context("claude-code", tmp, Path(tmp) / "state")
+            finally:
+                if before is None:
+                    del os.environ["__CFBundleIdentifier"]
+                else:
+                    os.environ["__CFBundleIdentifier"] = before
+            self.assertEqual(note["bundle"], "com.example.Editor")
+
     def test_the_hook_reads_the_cwd_from_stdin_and_prints_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = zyt.STATE

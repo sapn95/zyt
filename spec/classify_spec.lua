@@ -73,6 +73,20 @@ describe("classify.decide", function()
       assert.same({ "private", "llm" }, { decide({ app = "Code", title = "git", signal = signal }) })
     end)
 
+    it("applies the note to the application that wrote it and to no other", function()
+      local signal = { age = 60, remote = "git@github.com:me/budget.git", bundle = "com.microsoft.VSCode" }
+      assert.same(
+        { "private", "llm" },
+        { decide({ app = "Code", bundle = "com.microsoft.VSCode", title = "git", signal = signal }) }
+      )
+      assert.is_nil(decide({ app = "Kiro", bundle = "dev.kiro.desktop", title = "git", signal = signal }))
+      -- once nobody types, the session's repository counts wherever the focus is
+      assert.same(
+        { "private", "llm" },
+        { decide({ app = "Kiro", bundle = "dev.kiro.desktop", title = "git", idle = 900, signal = signal }) }
+      )
+    end)
+
     it("ignores a stale note", function()
       local signal = { age = 301, remote = "git@github.com:me/budget.git" }
       assert.is_nil(decide({ app = "Code", title = "git", signal = signal }))

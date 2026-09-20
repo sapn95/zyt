@@ -168,7 +168,7 @@ end
 local function focused()
   local window = hs.window.focusedWindow()
   local app = window and window:application() or hs.application.frontmostApplication()
-  return app and app:name() or "", window and window:title() or ""
+  return app and app:name() or "", window and window:title() or "", app and app:bundleID() or nil
 end
 
 local function iterm2Path()
@@ -190,11 +190,11 @@ function obj:signal()
   if not ok or type(decoded) ~= "table" or type(decoded.at) ~= "number" then
     return nil
   end
-  return { age = os.time() - decoded.at, remote = decoded.remote, source = decoded.source }
+  return { age = os.time() - decoded.at, remote = decoded.remote, source = decoded.source, bundle = decoded.bundle }
 end
 
 function obj:observe(now)
-  local app, title = focused()
+  local app, title, bundle = focused()
   local idle = hs.host.idleTime()
   local signal = self:signal()
   local away, awaySince = tracker.presence(self.state, now, {
@@ -213,6 +213,7 @@ function obj:observe(now)
   local cwdOf = self.cwdOf[app]
   local class, source = classify.decide(self.rules, {
     app = app,
+    bundle = bundle,
     title = title,
     idle = idle,
     cwd = cwdOf and cwdOf() or nil,

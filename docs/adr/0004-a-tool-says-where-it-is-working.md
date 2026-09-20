@@ -17,9 +17,12 @@ the directory of the file the tool touched (a session started in a folder full
 of checkouts says nothing by its working directory alone) or else the working
 directory, asks git for its `origin` remote, and writes a note
 (`context.json` in the state directory: when, which tool, which directory,
-which remote) whole and then renamed into place. The Spoon reads the note on
-every tick and, for a `repo` application whose own directory and title said
-nothing, uses it while it is younger than `signalSeconds`.
+which remote, and which application hosts the tool, from the bundle id macOS
+puts into every process an application starts) whole and then renamed into
+place. The Spoon reads the note on every tick and, for a `repo` application
+whose own directory and title said nothing, uses it while it is younger than
+`signalSeconds`, and only for the windows of the application that wrote it: a
+session in VS Code says nothing about a Kiro window on another repository.
 
 The hook prints nothing. Anything a `UserPromptSubmit` hook writes to standard
 output is handed to the model as context, and a time tracker has no business
