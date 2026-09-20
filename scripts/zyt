@@ -461,7 +461,16 @@ def write_context(source: str, cwd: str, state=None) -> dict:
     which remote that belongs to. Written whole, then renamed, so the Spoon
     never reads half a file."""
     state = state or STATE
-    note = {"at": int(time.time()), "source": source, "cwd": cwd, "remote": git_remote(cwd)}
+    note = {
+        "at": int(time.time()),
+        "source": source,
+        "cwd": cwd,
+        "remote": git_remote(cwd),
+        # macOS sets this for every process an application starts, so the hook
+        # knows which editor or terminal is hosting the session. The Spoon
+        # applies the note to that application's windows and to no other's.
+        "bundle": os.environ.get("__CFBundleIdentifier"),
+    }
     state.mkdir(parents=True, exist_ok=True)
     temporary = state / "context.json.tmp"
     temporary.write_text(json.dumps(note))
