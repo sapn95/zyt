@@ -13,7 +13,9 @@ in the employer's repository is work, one in a GitHub repository is not.
 
 The tool tells the tracker. `zyt hook claude-code` is wired to Claude Code's
 `UserPromptSubmit` and `PostToolUse` events; it reads the hook's JSON, takes
-the working directory, asks git for its `origin` remote, and writes a note
+the directory of the file the tool touched (a session started in a folder full
+of checkouts says nothing by its working directory alone) or else the working
+directory, asks git for its `origin` remote, and writes a note
 (`context.json` in the state directory: when, which tool, which directory,
 which remote) whole and then renamed into place. The Spoon reads the note on
 every tick and, for a `repo` application whose own directory and title said

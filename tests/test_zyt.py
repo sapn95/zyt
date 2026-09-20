@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -184,6 +185,20 @@ class Intervals(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].seconds, 3600)
             self.assertEqual(zyt.read_intervals(Path(tmp) / "missing.csv"), [])
+
+
+class HookDirectory(unittest.TestCase):
+    def test_the_file_a_tool_touches_wins_over_the_working_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inside = Path(tmp) / "repo" / "src"
+            inside.mkdir(parents=True)
+            payload = {"cwd": "/somewhere/else", "tool_input": {"file_path": str(inside / "main.go")}}
+            self.assertEqual(zyt.hook_directory(payload), str(inside))
+            payload = {"cwd": tmp, "tool_input": {"file_path": str(inside / "new" / "deeper" / "file.py")}}
+            self.assertEqual(zyt.hook_directory(payload), str(inside))
+            payload = {"cwd": tmp, "tool_input": {"command": "ls"}}
+            self.assertEqual(zyt.hook_directory(payload), tmp)
+            self.assertEqual(zyt.hook_directory("garbage"), os.getcwd())
 
 
 class Hook(unittest.TestCase):
