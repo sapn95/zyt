@@ -39,6 +39,10 @@ HS_IN_APP = "/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs"
 # else is not written rather than sanitised into somebody else's note.
 SESSION_TTL = 3 * 24 * 3600
 SESSION_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+# One lock for the whole directory, rather than one per session, so that there
+# is a single file nobody has to decide when to delete. A merge is a read and a
+# rename of a few hundred bytes; sessions waiting their turn cost nothing.
+SESSION_LOCK = ".lock"
 
 # "nobody has looked the remote up yet", as opposed to "looked, and there is
 # none". Asking git costs a process, and one hook event needs the answer twice.
@@ -488,7 +492,8 @@ def locked(path: Path):
     left running in the background reports a tool it used. Both would read the
     note, both would write it back, and the later one would erase what the other
     had just learnt. The lock is a file of its own, so the note itself stays one
-    atomic rename and the Spoon never has to take a lock to read it."""
+    atomic rename and the Spoon never has to take a lock to read it. It is never
+    deleted: a lock nobody can unlink from under a holder is one less race."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o600)
     try:
@@ -535,6 +540,11 @@ def prune_sessions(directory: Path, now: float) -> None:
     except OSError:
         return
     for entry in entries:
+        # The lock stays. It is empty, there is one of it, and unlinking a lock
+        # while a hook holds it would let the next two merges run at once: the
+        # one holding the gone inode and the one that made a fresh file.
+        if entry.name == SESSION_LOCK:
+            continue
         try:
             if now - entry.stat().st_mtime > SESSION_TTL:
                 entry.unlink()
@@ -558,7 +568,7 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     directory = state / "sessions"
     path = directory / f"{session}.json"
     now = int(time.time()) if at is None else at
-    with locked(directory / f"{session}.lock"):
+    with locked(directory / SESSION_LOCK):
         before = read_note(path)
         note = write_note(
             path,
