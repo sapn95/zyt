@@ -186,8 +186,8 @@ local function iterm2Path()
   return nil
 end
 
-function obj:signal()
-  local text = readFile(self.statePath .. "/context.json")
+function obj:note(name)
+  local text = readFile(self.statePath .. "/" .. name .. ".json")
   if not text then
     return nil
   end
@@ -196,6 +196,16 @@ function obj:signal()
     return nil
   end
   return { age = os.time() - decoded.at, remote = decoded.remote, source = decoded.source, bundle = decoded.bundle }
+end
+
+--- The last note any tool left: what some session is working on right now.
+function obj:signal()
+  return self:note("context")
+end
+
+--- The last prompt the person typed: the chat they are talking to.
+function obj:chat()
+  return self:note("chat")
 end
 
 function obj:observe(now)
@@ -223,6 +233,7 @@ function obj:observe(now)
     idle = idle,
     cwd = cwdOf and cwdOf() or nil,
     signal = signal,
+    chat = self:chat(),
     resolve = self.resolve,
   }
   local class, source = classify.decide(self.rules, obs)

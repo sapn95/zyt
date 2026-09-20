@@ -307,6 +307,30 @@ class Hook(unittest.TestCase):
                     os.environ["__CFBundleIdentifier"] = before
             self.assertEqual(note["bundle"], "com.example.Editor")
 
+    def test_a_prompt_also_marks_the_chat_being_talked_to(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = zyt.STATE
+            zyt.STATE = Path(tmp) / "state"
+            stdin, stdout = zyt.sys.stdin, zyt.sys.stdout
+            try:
+                zyt.sys.stdout = io.StringIO()
+                zyt.sys.stdin = io.StringIO(
+                    json.dumps({"cwd": tmp, "hook_event_name": "PostToolUse", "session_id": "a"})
+                )
+                zyt.main(["hook", "claude-code"])
+                self.assertFalse((zyt.STATE / "chat.json").exists())
+                zyt.sys.stdin = io.StringIO(
+                    json.dumps({"cwd": tmp, "hook_event_name": "UserPromptSubmit", "session_id": "b"})
+                )
+                zyt.main(["hook", "claude-code"])
+                chat = json.loads((zyt.STATE / "chat.json").read_text())
+                self.assertEqual(chat["session"], "b")
+                self.assertEqual(json.loads((zyt.STATE / "context.json").read_text())["session"], "b")
+                self.assertEqual(zyt.sys.stdout.getvalue(), "")
+            finally:
+                zyt.sys.stdin, zyt.sys.stdout = stdin, stdout
+                zyt.STATE = state
+
     def test_the_hook_reads_the_cwd_from_stdin_and_prints_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = zyt.STATE
