@@ -2,8 +2,9 @@
 ---
 --- Work or private: a menu-bar clock that knows which one is running. Every
 --- half minute, and whenever another application comes to the front, it looks
---- at the frontmost window, asks the rules, and keeps the answer as a segment. Locks, sleep and idle time end a segment; the rows go
---- to a CSV that `zyt week` turns into a booking proposal.
+--- at the frontmost window, asks the rules, and keeps the answer as a segment.
+--- Locks, sleep and idle time end a segment; the rows go to a CSV that
+--- `zyt week` turns into a booking proposal.
 ---
 --- Everything that decides anything lives in `zyt/` and is tested there. This
 --- file is the adapter: Hammerspoon on one side, those modules on the other.
