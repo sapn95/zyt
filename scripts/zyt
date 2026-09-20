@@ -323,9 +323,29 @@ def status() -> dict:
 # Commands
 
 
+def brew_prefix():
+    """Homebrew's opt path for zyt, which survives an upgrade; the Cellar path
+    this script resolves to does not, and a symlink into it dies quietly."""
+    brew = shutil.which("brew")
+    if not brew:
+        return None
+    try:
+        done = subprocess.run([brew, "--prefix", "zyt"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    prefix = Path(done.stdout.strip()) if done.returncode == 0 and done.stdout.strip() else None
+    return prefix if prefix and prefix.exists() else None
+
+
 def spoon_source() -> Path:
-    here = Path(__file__).resolve().parent
-    for candidate in (here.parent / "Zyt.spoon", here.parent / "libexec" / "Zyt.spoon"):
+    resolved = Path(__file__).resolve()
+    candidates = []
+    if "/Cellar/" in str(resolved):
+        prefix = brew_prefix()
+        if prefix:
+            candidates.append(prefix / "libexec" / "Zyt.spoon")
+    candidates += [resolved.parent.parent / "Zyt.spoon", resolved.parent.parent / "libexec" / "Zyt.spoon"]
+    for candidate in candidates:
         if (candidate / "init.lua").exists():
             return candidate
     raise SystemExit("cannot find Zyt.spoon next to this script")
@@ -422,6 +442,26 @@ def write_context(source: str, cwd: str, state=None) -> dict:
     return note
 
 
+def hook_directory(payload) -> str:
+    """The directory a hook event is about: the file the tool touched when
+    there is one, since a session started in a folder full of checkouts says
+    nothing by its working directory alone; otherwise that working directory."""
+    if not isinstance(payload, dict):
+        return os.getcwd()
+    tool_input = payload.get("tool_input")
+    if isinstance(tool_input, dict):
+        for key in ("file_path", "notebook_path"):
+            path = tool_input.get(key)
+            if isinstance(path, str) and path:
+                where = Path(path)
+                if not where.is_dir():
+                    where = where.parent
+                while not where.exists() and where != where.parent:
+                    where = where.parent
+                return str(where)
+    return payload.get("cwd") or os.getcwd()
+
+
 def cmd_hook(args) -> int:
     """For Claude Code: `zyt hook claude-code` on UserPromptSubmit and
     PostToolUse. Reads the hook's JSON, writes the note, says nothing: anything
@@ -430,8 +470,7 @@ def cmd_hook(args) -> int:
         payload = json.load(sys.stdin)
     except ValueError:
         payload = {}
-    cwd = payload.get("cwd") if isinstance(payload, dict) else None
-    write_context(args.tool, cwd or os.getcwd())
+    write_context(args.tool, hook_directory(payload))
     return 0
 
 
