@@ -251,6 +251,16 @@ class ReportCommand(unittest.TestCase):
                 zyt.sys.stdout = out
                 zyt.STATE, zyt.CONFIG = state, config
 
+    def test_a_date_that_is_not_one_is_said_in_a_line(self):
+        for when, single, wants in (
+            ("2026-13-01", True, "a day, YYYY-MM-DD"),
+            ("2026-W99", False, "a week, YYYY-Www"),
+            ("2026-09-14", False, "a week, YYYY-Www"),
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                zyt.period(when, single)
+            self.assertEqual(str(caught.exception), f"{when}: no such date; it wants {wants}")
+
 
 class Board(unittest.TestCase):
     def test_the_scale_is_the_window_widened_around_what_lies_outside_it(self):
