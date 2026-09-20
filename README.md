@@ -55,6 +55,7 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    ```json
    "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeFolderLong}"
    ```
+
 5. **Otherwise, what was already running.** A Finder window does not change
    whose time it is ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md)).
 

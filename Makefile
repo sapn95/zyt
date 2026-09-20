@@ -13,6 +13,7 @@ lint:
 	ruff check .
 	shellcheck scripts/*.sh
 	./scripts/leak-lint.sh
+	npx --yes markdownlint-cli2 "**/*.md"
 
 # luacov *adds to* luacov.stats.out rather than replacing it, so a second run in
 # the same checkout counts every line the first run hit as well. Left alone, the
