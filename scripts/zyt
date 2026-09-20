@@ -16,6 +16,7 @@ import csv
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,17 @@ STATE = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local" / "state") / "z
 SPOONS = HOME / ".hammerspoon" / "Spoons"
 LOAD_LINE = 'hs.loadSpoon("Zyt"):start()'
 HS_IN_APP = "/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs"
+
+# One note per chat session, kept for long enough that a session picked up the
+# next morning still finds its own, and no longer: the Spoon reads the whole
+# directory on every tick. A session id has to be a plain file name; anything
+# else is not written rather than sanitised into somebody else's note.
+SESSION_TTL = 3 * 24 * 3600
+SESSION_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+
+# "nobody has looked the remote up yet", as opposed to "looked, and there is
+# none". Asking git costs a process, and one hook event needs the answer twice.
+UNKNOWN = object()
 
 REPORT_DEFAULTS = {
     "workdays": [1, 2, 3, 4, 5],
@@ -456,26 +468,87 @@ def git_remote(cwd: str):
     return done.stdout.strip() or None
 
 
-def write_context(source: str, cwd: str, state=None, name: str = "context", session=None) -> dict:
-    """Leave a note for the Spoon: which directory a tool is working in, and
-    which remote that belongs to. Written whole, then renamed, so the Spoon
-    never reads half a file."""
-    state = state or STATE
-    note = {
-        "at": int(time.time()),
-        "source": source,
-        "cwd": cwd,
-        "remote": git_remote(cwd),
-        # macOS sets this for every process an application starts, so the hook
-        # knows which editor or terminal is hosting the session. The Spoon
-        # applies the note to that application's windows and to no other's.
-        "bundle": os.environ.get("__CFBundleIdentifier"),
-        "session": session,
-    }
-    state.mkdir(parents=True, exist_ok=True)
-    temporary = state / f"{name}.json.tmp"
+def write_note(path: Path, note: dict) -> dict:
+    """Written whole, then renamed, so the Spoon never reads half a file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / (path.name + ".tmp")
     temporary.write_text(json.dumps(note))
-    temporary.replace(state / f"{name}.json")
+    temporary.replace(path)
+    return note
+
+
+def read_note(path: Path) -> dict:
+    try:
+        note = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return note if isinstance(note, dict) else {}
+
+
+def write_context(source: str, cwd: str, state=None, name: str = "context", session=None, remote=UNKNOWN) -> dict:
+    """Leave a note for the Spoon: which directory a tool is working in, and
+    which remote that belongs to."""
+    state = state or STATE
+    return write_note(
+        (state / f"{name}.json"),
+        {
+            "at": int(time.time()),
+            "source": source,
+            "cwd": cwd,
+            "remote": git_remote(cwd) if remote is UNKNOWN else remote,
+            # macOS sets this for every process an application starts, so the
+            # hook knows which editor or terminal is hosting the session. The
+            # Spoon applies the note to that application's windows and to no
+            # other's.
+            "bundle": os.environ.get("__CFBundleIdentifier"),
+            "session": session,
+        },
+    )
+
+
+def prune_sessions(directory: Path, now: float) -> None:
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if now - entry.stat().st_mtime > SESSION_TTL:
+                entry.unlink()
+        except OSError:
+            continue
+
+
+def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, state=None):
+    """One note per chat session, so that several sessions running in the same
+    editor can be told apart.
+
+    The note remembers the last repository this session actually touched. A
+    session started in a folder full of checkouts resolves to nothing by its
+    working directory, and a prompt carries no file to go on, so without that
+    memory the chat the person is typing into would be the one thing about them
+    nobody knows. `promptAt` is when they last talked to it; a session that has
+    only ever worked is no chat and the Spoon skips it."""
+    state = state or STATE
+    if not isinstance(session, str) or not SESSION_NAME.match(session):
+        return None
+    directory = state / "sessions"
+    path = directory / f"{session}.json"
+    before = read_note(path)
+    now = int(time.time())
+    note = write_note(
+        path,
+        {
+            "at": now,
+            "promptAt": now if prompt else before.get("promptAt"),
+            "source": source,
+            "cwd": cwd,
+            "remote": (git_remote(cwd) if remote is UNKNOWN else remote) or before.get("remote"),
+            "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
+            "session": session,
+        },
+    )
+    prune_sessions(directory, now)
     return note
 
 
@@ -509,12 +582,20 @@ def cmd_hook(args) -> int:
         payload = {}
     where = hook_directory(payload)
     session = payload.get("session_id") if isinstance(payload, dict) else None
-    write_context(args.tool, where, session=session)
+    prompt = isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit"
+    remote = git_remote(where)
+    # The session's own note knows more than this one event does: the remote it
+    # last touched, even when the event itself is a prompt in a folder that is
+    # no checkout.
+    note = write_session(args.tool, where, session, prompt, remote=remote)
+    if note:
+        remote = note["remote"]
+    write_context(args.tool, where, session=session, remote=remote)
     # A prompt is the person talking to this chat. Several sessions can be
     # working at once, and only one of them is the one being typed into; the
     # Spoon uses this second note to classify the editor's window.
-    if isinstance(payload, dict) and payload.get("hook_event_name") == "UserPromptSubmit":
-        write_context(args.tool, where, name="chat", session=session)
+    if prompt:
+        write_context(args.tool, where, name="chat", session=session, remote=remote)
     return 0
 
 

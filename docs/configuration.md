@@ -12,7 +12,7 @@ run.
 | `tickSeconds` | `30` | How often the screen is looked at; a switch to another application is looked at at once. Applied on **Reload the rules** |
 | `idleSeconds` | `600` | No input for this long ends the segment, backdated to the last input ([ADR 0005](adr/0005-away-starts-at-the-last-input.md)) |
 | `signalSeconds` | `300` | How long a coding tool's note counts: as presence, and as the class once nobody types ([ADR 0004](adr/0004-a-tool-says-where-it-is-working.md)) |
-| `chatSeconds` | `14400` | How long the chat the person last typed into speaks for the editor hosting it |
+| `chatSeconds` | `14400` | How long a chat counts as open after the last prompt typed into it ([ADR 0010](adr/0010-which-chat-of-several.md)) |
 | `noIdleApps` | `[]` | Applications in front of which idle time does not count: calls |
 | `repoRoots` | `["~/git"]` | Where a word from a window title is looked up as a directory |
 | `remotes` | `[]` | `{"match": "<substring of the remote URL>", "class": "work"\|"private"}`, first match wins |
@@ -29,9 +29,11 @@ run.
 3. `apps[<frontmost application>]` when it is `work` or `private`.
 4. For an application marked `repo`: the remote of the repository it is in,
    found from its working directory, from an absolute path in its title, from
-   a word in its title that names a checkout, or from a recent tool note
-   written from inside that same application, in that order
-   ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)).
+   a word in its title that names a checkout, from the chats open in it, or
+   from a recent tool note written from inside that same application, in that
+   order ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)). Chats that
+   disagree are a question, not a guess
+   ([ADR 0010](adr/0010-which-chat-of-several.md)).
 5. The first `titles` rule whose text is in the window title.
 6. An answer given earlier for this repository or application.
 7. Otherwise the class that was already running, and a question if none has
@@ -61,6 +63,7 @@ How these turn a recorded week into a proposal is in
 | `~/.local/state/zyt/open.json` | The segment running now, rewritten every tick so a crash loses at most one tick |
 | `~/.local/state/zyt/context.json` | The last note a coding tool left: what some session is working on |
 | `~/.local/state/zyt/chat.json` | The last prompt the person typed: the chat they are talking to |
+| `~/.local/state/zyt/sessions/<id>.json` | One per chat session: when it was last worked in and last typed into, and the repository it last touched ([ADR 0010](adr/0010-which-chat-of-several.md)) |
 | `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
 
 `$XDG_STATE_HOME` moves the state directory. Timestamps are local time with

@@ -57,11 +57,64 @@ function M.paths(title, home)
   return out
 end
 
+--- The chats hosted in the application in front: the sessions somebody has
+--- typed into within `chatSeconds`, in the order the adapter sorted them,
+--- newest prompt first. A session that has never seen a prompt is not a chat
+--- anybody is looking at, and the adapter leaves it out.
+function M.liveChats(rules, obs)
+  local list = obs.chats
+  if not list and obs.chat then
+    list = { obs.chat }
+  end
+  local out = {}
+  for _, chat in ipairs(list or {}) do
+    if type(chat.age) == "number" and chat.age <= rules.chatSeconds and chat.bundle == obs.bundle and chat.remote then
+      out[#out + 1] = chat
+    end
+  end
+  return out
+end
+
+--- Which of the live chats the person is in. The one they picked by hand wins;
+--- otherwise the one they typed into last.
+---
+--- Returns remote, unsure, candidates. `unsure` says the answer is a guess:
+--- the live chats straddle both classes, and nothing on screen says which
+--- panel is in front, so only the person can. `candidates` are the chats whose
+--- repository the rules do have a class for — the ones worth offering.
+function M.chatOf(rules, obs)
+  local chats = M.liveChats(rules, obs)
+  if #chats == 0 then
+    return nil
+  end
+  local pick, candidates, seen, kinds = chats[1], {}, {}, 0
+  for _, chat in ipairs(chats) do
+    if obs.chosen and chat.session == obs.chosen then
+      pick = chat
+    end
+    local class = M.remoteClass(rules, chat.remote)
+    if class then
+      candidates[#candidates + 1] = chat
+      if not seen[class] then
+        seen[class] = true
+        kinds = kinds + 1
+      end
+    end
+  end
+  local told = obs.chosen ~= nil and pick.session == obs.chosen
+  local unsure
+  if kinds > 1 and not told then
+    unsure = true
+  end
+  return pick.remote, unsure, candidates
+end
+
 --- The remote of the repository a `repo` application's window is about, and
 --- where it was found: its working directory, an absolute path in the title,
---- a title word that names a checkout, the chat the person last typed into in
---- this same application, or a fresh note from any tool hosted in it. Nil
---- when none of them names a repository.
+--- a title word that names a checkout, the chat the person is in out of the
+--- ones hosted here, or a fresh note from any tool hosted in it. Nil when
+--- none of them names a repository. The third value is true when the chat was
+--- picked out of several that disagree.
 function M.repositoryOf(rules, obs)
   if obs.cwd then
     local remote = obs.resolve(obs.cwd)
@@ -83,15 +136,9 @@ function M.repositoryOf(rules, obs)
       end
     end
   end
-  local chat = obs.chat
-  if
-    chat
-    and type(chat.age) == "number"
-    and chat.age <= rules.chatSeconds
-    and chat.bundle == obs.bundle
-    and chat.remote
-  then
-    return chat.remote, "chat"
+  local chatted, unsure = M.chatOf(rules, obs)
+  if chatted then
+    return chatted, "chat", unsure
   end
   local signal = obs.signal
   if fresh(rules, signal) and (signal.bundle == nil or signal.bundle == obs.bundle) and signal.remote then
@@ -101,10 +148,10 @@ function M.repositoryOf(rules, obs)
 end
 
 local function byRepository(rules, obs)
-  local remote, how = M.repositoryOf(rules, obs)
+  local remote, how, unsure = M.repositoryOf(rules, obs)
   local class = M.remoteClass(rules, remote)
   if class then
-    return class, how
+    return class, how, unsure
   end
   return nil
 end
@@ -126,9 +173,12 @@ end
 ---   obs.cwd      the working directory the application reported, if it can
 ---   obs.idle     seconds since the last input
 ---   obs.signal   { age = seconds, remote = url, bundle = id } left behind by a tool's hook
----   obs.chat     the same, from the last prompt the person typed into a chat
+---   obs.chats    the same per chat session, plus promptAt and session, newest prompt first
+---   obs.chosen   the session id the person named as the chat they are in
 ---   obs.resolve  function(path) -> remote url or nil
---- Returns class, source — or nil when nothing here has an opinion.
+--- Returns class, source, unsure — or nil when nothing here has an opinion.
+--- `unsure` means the class is right for one of the chats open here and the
+--- person is the only one who can say it is theirs.
 ---
 --- While nobody has typed for `idleSeconds` and a coding tool has reported in
 --- recently, the tool's repository decides: the window in front is whatever
@@ -147,9 +197,9 @@ function M.decide(rules, obs)
     return byApp, "app"
   end
   if byApp == "repo" then
-    local class, source = byRepository(rules, obs)
+    local class, source, unsure = byRepository(rules, obs)
     if class then
-      return class, source
+      return class, source, unsure
     end
   end
   return byTitle(rules, obs.title)

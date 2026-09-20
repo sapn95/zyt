@@ -95,6 +95,62 @@ describe("classify.decide", function()
       )
     end)
 
+    it("counts every chat of this application, not only the last one typed into", function()
+      local work = {
+        age = 60,
+        promptAt = 200,
+        session = "w",
+        remote = "ssh://git@git.example.com:7999/team/infra.git",
+        bundle = "com.microsoft.VSCode",
+      }
+      local also = {
+        age = 3000,
+        promptAt = 100,
+        session = "w2",
+        remote = "ssh://git@git.example.com:7999/team/other.git",
+        bundle = "com.microsoft.VSCode",
+      }
+      local obs = { app = "Code", bundle = "com.microsoft.VSCode", title = "git", chats = { work, also } }
+      -- two chats that agree: which panel is in front does not matter
+      assert.same({ "work", "chat" }, { decide(obs) })
+
+      -- one of each, and nothing on screen says which is in front
+      also.remote = "git@github.com:me/budget.git"
+      assert.same({ "work", "chat", true }, { decide(obs) })
+
+      -- unless the person has said, and then their word stands
+      obs.chosen = "w2"
+      assert.same({ "private", "chat" }, { decide(obs) })
+      obs.chosen = "gone"
+      assert.same({ "work", "chat", true }, { decide(obs) })
+
+      -- a chat whose repository the rules know nothing about is not a second
+      -- opinion, it is no opinion
+      also.remote = "git@example.org:me/elsewhere.git"
+      obs.chosen = nil
+      assert.same({ "work", "chat" }, { decide(obs) })
+    end)
+
+    it("offers as candidates only the chats the rules have a class for", function()
+      local chats = {
+        { age = 1, promptAt = 3, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
+        { age = 2, promptAt = 2, session = "b", remote = "git@example.org:me/elsewhere.git", bundle = "b" },
+        {
+          age = 3,
+          promptAt = 1,
+          session = "c",
+          remote = "ssh://git@git.example.com:7999/team/infra.git",
+          bundle = "b",
+        },
+      }
+      local remote, unsure, candidates = classify.chatOf(R, { bundle = "b", chats = chats })
+      assert.equal("git@github.com:me/budget.git", remote)
+      assert.is_true(unsure)
+      assert.same({ "a", "c" }, { candidates[1].session, candidates[2].session })
+      assert.equal(2, #candidates)
+      assert.is_nil(classify.chatOf(R, { bundle = "b", chats = {} }))
+    end)
+
     it("applies the note to the application that wrote it and to no other", function()
       local signal = { age = 60, remote = "git@github.com:me/budget.git", bundle = "com.microsoft.VSCode" }
       assert.same(
