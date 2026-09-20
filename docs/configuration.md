@@ -66,6 +66,7 @@ How these turn a recorded week into a proposal is in
 | `~/.local/state/zyt/sessions/<id>.json` | One per chat session: when it was last worked in and last typed into, and the repository it last touched ([ADR 0010](adr/0010-which-chat-of-several.md)) |
 | `~/.local/state/zyt/sessions/.lock` | Empty, and held while the notes are merged and the expired ones dropped, so two hooks cannot undo each other |
 | `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
+| `~/.local/state/zyt/board.html` | The last board `zyt board` drew, overwritten each time unless `--out` says otherwise ([ADR 0011](adr/0011-the-board-is-one-file.md)) |
 
 `$XDG_STATE_HOME` moves the state directory. Timestamps are local time with
 the offset written out, so a week spanning a clock change still adds up.
