@@ -16,6 +16,7 @@ M.defaults = {
   remotes = {},
   apps = {},
   titles = {},
+  prompt = { enabled = true, seconds = 20, cooldownSeconds = 1800 },
 }
 
 local function fail(format, ...)
@@ -68,6 +69,22 @@ function M.normalise(raw, home)
     labels[key] = rules.labels[key] or default
   end
   rules.labels = labels
+
+  if type(rules.prompt) ~= "table" then
+    return fail("prompt has to be a JSON object")
+  end
+  local prompt = {}
+  for key, default in pairs(M.defaults.prompt) do
+    local value = rules.prompt[key]
+    if value == nil then
+      value = default
+    end
+    if type(value) ~= type(default) or (type(value) == "number" and value <= 0) then
+      return fail("prompt.%s has to be a %s like %s", key, type(default), tostring(default))
+    end
+    prompt[key] = value
+  end
+  rules.prompt = prompt
 
   for app, class in pairs(rules.apps) do
     if not (CLASSES[class] or class == "repo") then

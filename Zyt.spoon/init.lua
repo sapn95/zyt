@@ -26,6 +26,7 @@ local classify = require("zyt.classify")
 local repo = require("zyt.repo")
 local tracker = require("zyt.tracker")
 local totals = require("zyt.totals")
+local learned = require("zyt.learned")
 
 local HOME = os.getenv("HOME")
 
@@ -171,6 +172,10 @@ local function focused()
   return app and app:name() or "", window and window:title() or "", app and app:bundleID() or nil
 end
 
+local function idleIsShort(idle)
+  return type(idle) == "number" and idle < 120
+end
+
 local function iterm2Path()
   local ok, out = hs.osascript.applescript(
     'tell application "iTerm2" to tell current session of current window to get variable named "session.path"'
@@ -211,7 +216,7 @@ function obj:observe(now)
     return { class = self.override, source = "manual", app = app }
   end
   local cwdOf = self.cwdOf[app]
-  local class, source = classify.decide(self.rules, {
+  local obs = {
     app = app,
     bundle = bundle,
     title = title,
@@ -219,8 +224,156 @@ function obj:observe(now)
     cwd = cwdOf and cwdOf() or nil,
     signal = signal,
     resolve = self.resolve,
-  })
+  }
+  local class, source = classify.decide(self.rules, obs)
+  if not class then
+    class, source = self:recall(now, obs)
+  end
   return { class = class, source = source, app = app }
+end
+
+--- What the person answered the last time this window came up, or a fresh
+--- question when nothing is known yet. Nil while the answer is pending: the
+--- tracker keeps whatever was running (ADR 0002).
+function obj:recall(now, obs)
+  local remote
+  if self.rules.apps[obs.app or ""] == "repo" then
+    remote = classify.repositoryOf(self.rules, obs)
+  end
+  local key = learned.key(remote, obs.app)
+  local answer = learned.lookup(self.learned, key)
+  if answer == "work" or answer == "private" then
+    return answer, "learned"
+  end
+  if answer == nil and key and self.rules.prompt.enabled and idleIsShort(obs.idle) then
+    if learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
+      self.asked[key] = now
+      self:ask(key, remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app)
+    end
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Answers
+
+function obj:loadLearned()
+  self.learned = {}
+  self.asked = {}
+  local text = readFile(self.statePath .. "/learned.json")
+  if text then
+    local ok, decoded = pcall(hs.json.decode, text)
+    if ok and type(decoded) == "table" then
+      self.learned = decoded
+    end
+  end
+end
+
+function obj:saveLearned()
+  writeAtomically(self.statePath .. "/learned.json", hs.json.encode(self.learned, true))
+end
+
+function obj:forget()
+  self.learned = {}
+  self.asked = {}
+  os.remove(self.statePath .. "/learned.json")
+  self:tick()
+end
+
+--- Zyt:ask(key, what)
+--- Method
+--- A small panel under the menu bar: Work, Private, or Don't ask. It goes
+--- away by itself after `prompt.seconds`, and the class stays what it was
+--- until it is answered.
+function obj:ask(key, what)
+  if self.prompt then
+    return
+  end
+  local screen = hs.screen.mainScreen():frame()
+  local w, h = 380, 92
+  local canvas = hs.canvas.new({ x = screen.x + screen.w - w - 12, y = screen.y + 6, w = w, h = h })
+  local function button(id, x, width, label, color)
+    return {
+      {
+        id = id,
+        type = "rectangle",
+        action = "fill",
+        frame = { x = x, y = 54, w = width, h = 28 },
+        fillColor = color,
+        roundedRectRadii = { xRadius = 6, yRadius = 6 },
+        trackMouseUp = true,
+      },
+      {
+        type = "text",
+        text = label,
+        textSize = 13,
+        textColor = { white = 1 },
+        textAlignment = "center",
+        frame = { x = x, y = 58, w = width, h = 22 },
+      },
+    }
+  end
+  canvas:appendElements({
+    type = "rectangle",
+    action = "fill",
+    fillColor = { red = 0.13, green = 0.13, blue = 0.15, alpha = 0.96 },
+    roundedRectRadii = { xRadius = 10, yRadius = 10 },
+  }, {
+    type = "text",
+    text = "zyt · whose time is this?",
+    textSize = 12,
+    textColor = { white = 0.7 },
+    frame = { x = 14, y = 8, w = w - 28, h = 18 },
+  }, {
+    type = "text",
+    text = what or "",
+    textSize = 14,
+    textColor = { white = 1 },
+    frame = { x = 14, y = 26, w = w - 28, h = 22 },
+  })
+  for _, element in ipairs(button("work", 14, 100, "Work", { red = 0.20, green = 0.45, blue = 0.85 })) do
+    canvas:appendElements(element)
+  end
+  for _, element in ipairs(button("private", 124, 100, "Private", { red = 0.55, green = 0.35, blue = 0.75 })) do
+    canvas:appendElements(element)
+  end
+  for _, element in ipairs(button("inherit", 234, 132, "Don't ask", { red = 0.35, green = 0.35, blue = 0.38 })) do
+    canvas:appendElements(element)
+  end
+  canvas:mouseCallback(function(_, event, id)
+    if event == "mouseUp" then
+      self:answer(key, id)
+    end
+  end)
+  canvas:clickActivating(false)
+  canvas:level(hs.canvas.windowLevels.floating)
+  canvas:show()
+  self.prompt = {
+    canvas = canvas,
+    key = key,
+    timer = hs.timer.doAfter(self.rules.prompt.seconds, function()
+      self:dismiss()
+    end),
+  }
+end
+
+function obj:dismiss()
+  local prompt = self.prompt
+  if not prompt then
+    return
+  end
+  self.prompt = nil
+  if prompt.timer then
+    prompt.timer:stop()
+  end
+  prompt.canvas:delete()
+end
+
+function obj:answer(key, answer)
+  learned.remember(self.learned, key, answer)
+  self:saveLearned()
+  self:dismiss()
+  self:tick()
 end
 
 -- ---------------------------------------------------------------------------
@@ -402,6 +555,12 @@ function obj:menu()
         self:tick()
       end,
     },
+    {
+      title = "Forget the answers, ask again",
+      fn = function()
+        self:forget()
+      end,
+    },
     { title = "-" },
     {
       title = "Quit zyt",
@@ -449,6 +608,7 @@ function obj:watch()
   self.watcher = W.new(function(event)
     if event == W.screensDidLock or event == W.sessionDidResignActive then
       self.locked = true
+      self:dismiss()
       self:closeNow()
     elseif event == W.screensDidUnlock or event == W.sessionDidBecomeActive then
       self.locked = false
@@ -474,6 +634,7 @@ function obj:start()
   end
   ensureDirectory(self.statePath)
   self:loadRules()
+  self:loadLearned()
   self.resolve = repo.resolver(repo.fs, 600, os.time)
   self.cwdOf = self.cwdOf or { iTerm2 = iterm2Path }
   local checkout = self.spoonPath .. "../scripts/zyt"
@@ -518,6 +679,7 @@ function obj:stop()
     return self
   end
   self:closeNow()
+  self:dismiss()
   if self.timer then
     self.timer:stop()
     self.timer = nil

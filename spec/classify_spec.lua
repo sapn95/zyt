@@ -116,6 +116,20 @@ describe("classify.decide", function()
   end)
 end)
 
+describe("classify.repositoryOf", function()
+  it("names the repository even when no rule knows its class", function()
+    local unknown = function(path)
+      return path == "/Users/me/git/gadget" and "git@gitlab.com:me/gadget.git" or nil
+    end
+    assert.same(
+      { "git@gitlab.com:me/gadget.git", "cwd" },
+      { classify.repositoryOf(R, { app = "iTerm2", title = "", cwd = "/Users/me/git/gadget", resolve = unknown }) }
+    )
+    assert.is_nil(classify.decide(R, { app = "iTerm2", title = "", cwd = "/Users/me/git/gadget", resolve = unknown }))
+    assert.is_nil(classify.repositoryOf(R, { app = "iTerm2", title = "nothing", resolve = unknown }))
+  end)
+end)
+
 describe("classify.tokens", function()
   it("splits on whitespace and path separators and strips decoration", function()
     assert.same(

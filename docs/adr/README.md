@@ -14,3 +14,4 @@ their idea was considered or simply missed.
 | [0006](0006-the-proposal-moves-minutes-it-never-makes-them.md) | The booking proposal moves minutes, it never makes or loses them |
 | [0007](0007-the-command-line-is-python.md) | The command line is Python, the Spoon is Lua |
 | [0008](0008-the-rules-stay-out-of-the-repository.md) | The rules stay out of the repository |
+| [0009](0009-ask-once-and-remember.md) | Ask once, and remember the answer |
