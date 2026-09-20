@@ -64,6 +64,7 @@ How these turn a recorded week into a proposal is in
 | `~/.local/state/zyt/context.json` | The last note a coding tool left: what some session is working on |
 | `~/.local/state/zyt/chat.json` | The last prompt the person typed: the chat they are talking to |
 | `~/.local/state/zyt/sessions/<id>.json` | One per chat session: when it was last worked in and last typed into, and the repository it last touched ([ADR 0010](adr/0010-which-chat-of-several.md)) |
+| `~/.local/state/zyt/sessions/<id>.lock` | Empty, and held while that note is being merged, so two hooks of one session cannot undo each other |
 | `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
 
 `$XDG_STATE_HOME` moves the state directory. Timestamps are local time with
