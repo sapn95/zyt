@@ -1,8 +1,8 @@
 --- === Zyt ===
 ---
 --- Work or private: a menu-bar clock that knows which one is running. Every
---- half minute it looks at the frontmost window, asks the rules, and keeps the
---- answer as a segment. Locks, sleep and idle time end a segment; the rows go
+--- half minute, and whenever another application comes to the front, it looks
+--- at the frontmost window, asks the rules, and keeps the answer as a segment. Locks, sleep and idle time end a segment; the rows go
 --- to a CSV that `zyt week` turns into a booking proposal.
 ---
 --- Everything that decides anything lives in `zyt/` and is tested there. This
@@ -396,6 +396,16 @@ end
 -- Lifecycle
 
 function obj:watch()
+  -- A switch to another application is looked at at once, so the menu-bar
+  -- item changes when the window does and not up to a tick later.
+  local A = hs.application.watcher
+  self.appWatcher = A.new(function(_, event)
+    if event == A.activated and self.running then
+      self:tick()
+    end
+  end)
+  self.appWatcher:start()
+
   local W = hs.caffeinate.watcher
   self.watcher = W.new(function(event)
     if event == W.screensDidLock or event == W.sessionDidResignActive then
@@ -475,9 +485,11 @@ function obj:stop()
     self.timer:stop()
     self.timer = nil
   end
-  if self.watcher then
-    self.watcher:stop()
-    self.watcher = nil
+  for _, key in ipairs({ "watcher", "appWatcher" }) do
+    if self[key] then
+      self[key]:stop()
+      self[key] = nil
+    end
   end
   if self.menubar then
     self.menubar:delete()
