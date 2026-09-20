@@ -246,9 +246,10 @@ end
 --- `signal` is for.
 ---
 --- The shared note counts too, for as long as nothing hosted in the same
---- application has spoken: a prompt that carries no session id of its own
---- leaves only that one, and dropping it would hand the window to some other
---- application's session.
+--- application has spoken for the same prompt: a prompt that carries no session
+--- id of its own leaves only that one, and dropping it would hand the window to
+--- some other application's session. An older session note of that application
+--- is a different chat and does not speak for it.
 function obj:chats()
   local directory = self.statePath .. "/sessions"
   local out = {}
@@ -278,7 +279,7 @@ function obj:chats()
   if shared then
     local spokenFor = false
     for _, chat in ipairs(out) do
-      spokenFor = spokenFor or chat.bundle == shared.bundle
+      spokenFor = spokenFor or (chat.bundle == shared.bundle and chat.promptAt >= shared.at)
     end
     if not spokenFor then
       shared.promptAt = shared.at

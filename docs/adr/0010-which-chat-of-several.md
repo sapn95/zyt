@@ -28,7 +28,11 @@ the common case is the broken one — a session started in a folder full of
 checkouts has a working directory that resolves to no repository, and a prompt
 carries no file to go on, so the chat being typed into would be the one thing
 about it nobody knows. A session that has only ever worked has no `promptAt`
-and is no chat; the busy ones are what `context.json` is for.
+and is no chat; the busy ones are what `context.json` is for. The merge takes a
+lock on a file beside the note, because a session's hooks do arrive at once: a
+prompt typed while a task left running in the background reports the file it
+touched. Both would read the note and the later write would erase what the other
+had just learnt.
 
 **Agreement is certainty.** The Spoon reads every note, keeps the ones written
 by the application in front and typed into within `chatSeconds`, and asks the
