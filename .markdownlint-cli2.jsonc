@@ -1,0 +1,9 @@
+{
+  "config": {
+    // Prose here is hard-wrapped for the diff, not for a column counter.
+    "MD013": false,
+    // The documents start at h1 and use one level of headings under it.
+    "MD024": { "siblings_only": true }
+  },
+  "globs": ["**/*.md"]
+}

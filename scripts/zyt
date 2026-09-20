@@ -1,0 +1,522 @@
+#!/usr/bin/env python3
+"""The command line half of zyt.
+
+Link the Spoon into Hammerspoon, switch the class by hand, say what is wrong,
+and turn the rows the Spoon writes into a week you can book: weekdays only,
+inside the hours you set, in blocks no longer than you allow, with a break
+between them, and not a minute more or less than was recorded.
+
+Standard library only, and nothing newer than the python3 a Mac ships with.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import datetime as dt
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+HOME = Path.home()
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "zyt" / "rules.json"
+STATE = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local" / "state") / "zyt"
+SPOONS = HOME / ".hammerspoon" / "Spoons"
+LOAD_LINE = 'hs.loadSpoon("Zyt"):start()'
+HS_IN_APP = "/Applications/Hammerspoon.app/Contents/Frameworks/hs/hs"
+
+REPORT_DEFAULTS = {
+    "workdays": [1, 2, 3, 4, 5],
+    "earliest": "07:00",
+    "latest": "20:00",
+    "maxBlockMinutes": 300,
+    "breakMinutes": 30,
+    "defaultStart": "08:00",
+    "fillEmptyDays": False,
+}
+CHUNK_MINUTES = 15
+
+
+# ---------------------------------------------------------------------------
+# Rules
+
+
+def load_rules(path: Path = CONFIG) -> dict:
+    try:
+        rules = json.loads(path.read_text())
+    except FileNotFoundError:
+        rules = {}
+    if not isinstance(rules, dict):
+        raise SystemExit(f"{path}: the rules file has to hold a JSON object")
+    report = dict(REPORT_DEFAULTS)
+    report.update(rules.get("report") or {})
+    rules["report"] = report
+    return rules
+
+
+def minutes(clock: str) -> int:
+    hours, mins = clock.split(":")
+    return int(hours) * 60 + int(mins)
+
+
+def clock(total: int) -> str:
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+# ---------------------------------------------------------------------------
+# Intervals
+
+
+@dataclass
+class Segment:
+    start: dt.datetime
+    end: dt.datetime
+    cls: str
+
+    @property
+    def seconds(self) -> int:
+        return int((self.end - self.start).total_seconds())
+
+
+def read_intervals(path: Path) -> list:
+    if not path.exists():
+        return []
+    segments = []
+    with path.open(newline="") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                start = dt.datetime.fromisoformat(row["start"])
+                end = dt.datetime.fromisoformat(row["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if end > start and row.get("class") in ("work", "private"):
+                segments.append(Segment(start, end, row["class"]))
+    return segments
+
+
+def split_by_day(segments: list) -> list:
+    """Cut every segment at local midnight, so a day adds up to its own hours."""
+    out = []
+    for segment in segments:
+        start = segment.start
+        while start.date() < segment.end.date():
+            midnight = dt.datetime.combine(start.date() + dt.timedelta(days=1), dt.time(), tzinfo=start.tzinfo)
+            out.append(Segment(start, midnight, segment.cls))
+            start = midnight
+        if segment.end > start:
+            out.append(Segment(start, segment.end, segment.cls))
+    return out
+
+
+def summarise(day_segments: list) -> dict:
+    work = sorted((s for s in day_segments if s.cls == "work"), key=lambda s: s.start)
+    private = sum(s.seconds for s in day_segments if s.cls == "private")
+    longest_break = 0
+    for earlier, later in zip(work, work[1:]):
+        longest_break = max(longest_break, int((later.start - earlier.end).total_seconds()))
+    return {
+        "start": work[0].start if work else None,
+        "end": work[-1].end if work else None,
+        "work": sum(s.seconds for s in work),
+        "private": private,
+        "break": longest_break,
+    }
+
+
+def week_days(segments: list, monday: dt.date) -> dict:
+    days = {monday + dt.timedelta(days=i): [] for i in range(7)}
+    for segment in split_by_day(segments):
+        day = segment.start.date()
+        if day in days:
+            days[day].append(segment)
+    return {day: summarise(items) for day, items in days.items()}
+
+
+# ---------------------------------------------------------------------------
+# The booking proposal
+
+
+def capacity(report: dict) -> int:
+    """The most minutes one day can hold: blocks and breaks inside the window."""
+    window = minutes(report["latest"]) - minutes(report["earliest"])
+    held = 0
+    while window > 0:
+        block = min(report["maxBlockMinutes"], window)
+        held += block
+        window -= block + report["breakMinutes"]
+    return held
+
+
+def anchor(summary: dict, report: dict) -> int:
+    """Where the first block starts: the real start when it fits, rounded down
+    to five minutes and kept inside the window."""
+    start = summary["start"]
+    if start is None:
+        return minutes(report["defaultStart"])
+    at = start.hour * 60 + start.minute
+    at -= at % 5
+    return min(max(at, minutes(report["earliest"])), minutes(report["latest"]))
+
+
+def layout(start: int, total: int, report: dict) -> list:
+    """Blocks of at most maxBlockMinutes with a break between, ending no later
+    than `latest`; shifted earlier as a whole when they would."""
+    blocks = []
+    cursor, remaining = start, total
+    while remaining > 0:
+        block = min(report["maxBlockMinutes"], remaining)
+        blocks.append([cursor, cursor + block])
+        cursor += block + report["breakMinutes"]
+        remaining -= block
+    if blocks:
+        overshoot = blocks[-1][1] - minutes(report["latest"])
+        if overshoot > 0:
+            blocks = [[s - overshoot, e - overshoot] for s, e in blocks]
+    return blocks
+
+
+def propose(days: dict, report: dict) -> tuple:
+    """Redistribute the week's work onto its workdays.
+
+    Every recorded minute is kept and none is invented. A workday keeps its own
+    hours up to the day's capacity; what does not fit, and everything from the
+    other days, is dealt out to the workdays with the fewest hours first. What
+    still finds no room is returned as the leftover, so it is seen rather than
+    lost.
+    """
+    cap = capacity(report)
+    workdays = [day for day in sorted(days) if day.isoweekday() in report["workdays"]]
+    recorded = {day: days[day]["work"] // 60 for day in days}
+    booked = {day: min(recorded[day], cap) for day in workdays}
+    pool = sum(recorded[day] for day in days if day not in booked)
+    pool += sum(recorded[day] - booked[day] for day in workdays)
+    eligible = [day for day in workdays if recorded[day] > 0 or report["fillEmptyDays"]]
+    while pool > 0:
+        room = [day for day in eligible if booked[day] < cap]
+        if not room:
+            break
+        day = min(room, key=lambda d: (booked[d], d))
+        added = min(CHUNK_MINUTES, pool, cap - booked[day])
+        booked[day] += added
+        pool -= added
+    blocks = {day: layout(anchor(days[day], report), booked[day], report) for day in workdays}
+    return blocks, booked, pool
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+
+
+def fmt_h(seconds: int) -> str:
+    total = max(0, int(seconds)) // 60
+    return f"{total // 60}h{total % 60:02d}"
+
+
+def fmt_m(mins: int) -> str:
+    return f"{mins // 60}h{mins % 60:02d}"
+
+
+def fmt_at(moment) -> str:
+    return moment.strftime("%H:%M") if moment else "  -  "
+
+
+def parse_week(text: str) -> dt.date:
+    year, week = text.upper().split("-W")
+    return dt.date.fromisocalendar(int(year), int(week), 1)
+
+
+def week_of(day: dt.date) -> str:
+    year, week, _ = day.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def booking_of(day: dt.date, summary: dict, blocks: dict) -> str:
+    if day in blocks:
+        return ", ".join(f"{clock(s)}-{clock(e)}" for s, e in blocks[day]) or "-"
+    return "moved to the workdays" if summary["work"] else "-"
+
+
+def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftover: int) -> str:
+    sunday = monday + dt.timedelta(days=6)
+    bookings = {day: booking_of(day, days[day], blocks) for day in days}
+    width = max(len(text) for text in bookings.values()) + 2
+    lines = [
+        f"Week {week_of(monday)}  {monday:%d.%m.} to {sunday:%d.%m.%Y}",
+        "",
+        f"{'':11}{'recorded':<36}  {'proposal'}",
+        f"{'day':<11}{'start':<7}{'end':<7}{'work':<7}{'private':<9}{'break':<6}  {'booking':<{width}}{'booked'}",
+    ]
+    total_work = total_private = total_booked = 0
+    for day in sorted(days):
+        summary = days[day]
+        total_work += summary["work"]
+        total_private += summary["private"]
+        amount = "-"
+        if day in blocks:
+            amount = fmt_m(booked[day])
+            total_booked += booked[day]
+        lines.append(
+            f"{day:%a %d.%m.}  {fmt_at(summary['start']):<7}{fmt_at(summary['end']):<7}"
+            f"{fmt_h(summary['work']):<7}{fmt_h(summary['private']):<9}{fmt_h(summary['break']):<6}  "
+            f"{bookings[day]:<{width}}{amount}"
+        )
+    lines.append("")
+    lines.append(
+        f"recorded {fmt_h(total_work)} work, {fmt_h(total_private)} private  ·  "
+        f"booked {fmt_m(total_booked)}  ·  left over {fmt_m(leftover)}"
+    )
+    return "\n".join(lines)
+
+
+def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
+    return {
+        "days": {
+            day.isoformat(): {
+                "start": summary["start"].isoformat() if summary["start"] else None,
+                "end": summary["end"].isoformat() if summary["end"] else None,
+                "work": summary["work"],
+                "private": summary["private"],
+                "break": summary["break"],
+                "booking": [[clock(s), clock(e)] for s, e in blocks.get(day, [])],
+                "booked": booked.get(day, 0) * 60,
+            }
+            for day, summary in sorted(days.items())
+        },
+        "leftover": leftover * 60,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Hammerspoon
+
+
+def hs_binary() -> str:
+    return shutil.which("hs") or HS_IN_APP
+
+
+def hs_call(lua: str, timeout: float = 8.0):
+    """Run Lua inside Hammerspoon and return its last line, or None when it does
+    not answer. `-A` on every call: without it the client asks LaunchServices
+    whether Hammerspoon is running and can hang in a dialog nobody sees."""
+    try:
+        done = subprocess.run([hs_binary(), "-A", "-c", lua], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = done.stdout.strip().splitlines()
+    return lines[-1] if lines else None
+
+
+def status() -> dict:
+    answer = hs_call("return _G.zyt and _G.zyt:statusJSON() or 'null'")
+    try:
+        return json.loads(answer) if answer else None
+    except ValueError:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Commands
+
+
+def spoon_source() -> Path:
+    here = Path(__file__).resolve().parent
+    for candidate in (here.parent / "Zyt.spoon", here.parent / "libexec" / "Zyt.spoon"):
+        if (candidate / "init.lua").exists():
+            return candidate
+    raise SystemExit("cannot find Zyt.spoon next to this script")
+
+
+def cmd_link(_args) -> int:
+    SPOONS.mkdir(parents=True, exist_ok=True)
+    target = SPOONS / "Zyt.spoon"
+    source = spoon_source()
+    if target.is_symlink() or target.exists():
+        target.unlink()
+    target.symlink_to(source)
+    print(f"linked {target} -> {source}")
+    print()
+    print("Add this to ~/.hammerspoon/init.lua and reload Hammerspoon:")
+    print()
+    print(f"    {LOAD_LINE}")
+    print()
+    if not CONFIG.exists():
+        print(f"There is no rules file yet at {CONFIG}; examples/rules.json in the repository is a start.")
+    return 0
+
+
+def cmd_unlink(_args) -> int:
+    target = SPOONS / "Zyt.spoon"
+    if target.is_symlink() or target.exists():
+        target.unlink()
+        print(f"removed {target}")
+    else:
+        print(f"nothing at {target}")
+    return 0
+
+
+def cmd_status(_args) -> int:
+    state = status()
+    if not state:
+        print("zyt is not running in Hammerspoon (try: zyt doctor)")
+        return 1
+    what = "away" if state.get("away") else f"{state['class']} since {state['since'][11:16]} ({state['source']})"
+    if state.get("override"):
+        what += ", pinned by hand"
+    today = state.get("today") or {}
+    print(f"{what}  ·  today {fmt_h(today.get('work', 0))} work, {fmt_h(today.get('private', 0))} private")
+    return 0
+
+
+def cmd_switch(args) -> int:
+    lua = {"work": '"work"', "private": '"private"', "auto": "nil"}[args.command]
+    answer = hs_call(f"return _G.zyt and _G.zyt:setOverride({lua}) or 'null'")
+    if not answer or answer == "null":
+        print("zyt is not running in Hammerspoon (try: zyt doctor)")
+        return 1
+    return cmd_status(args)
+
+
+def cmd_report(args) -> int:
+    rules = load_rules()
+    if args.command == "day":
+        day = dt.date.fromisoformat(args.when) if args.when else dt.date.today()
+        monday = day - dt.timedelta(days=day.weekday())
+    else:
+        monday = parse_week(args.when) if args.when else dt.date.today() - dt.timedelta(days=dt.date.today().weekday())
+    days = week_days(read_intervals(STATE / "intervals.csv"), monday)
+    blocks, booked, leftover = propose(days, rules["report"])
+    if args.command == "day":
+        days = {day: days[day]}
+    if args.json:
+        print(json.dumps(week_json(days, blocks, booked, leftover), indent=2))
+    else:
+        print(render_week(monday, days, blocks, booked, leftover))
+    return 0
+
+
+def git_remote(cwd: str):
+    try:
+        done = subprocess.run(
+            ["git", "-C", cwd, "remote", "get-url", "origin"], capture_output=True, text=True, timeout=2
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout.strip() or None
+
+
+def write_context(source: str, cwd: str, state=None) -> dict:
+    """Leave a note for the Spoon: which directory a tool is working in, and
+    which remote that belongs to. Written whole, then renamed, so the Spoon
+    never reads half a file."""
+    state = state or STATE
+    note = {"at": int(time.time()), "source": source, "cwd": cwd, "remote": git_remote(cwd)}
+    state.mkdir(parents=True, exist_ok=True)
+    temporary = state / "context.json.tmp"
+    temporary.write_text(json.dumps(note))
+    temporary.replace(state / "context.json")
+    return note
+
+
+def cmd_hook(args) -> int:
+    """For Claude Code: `zyt hook claude-code` on UserPromptSubmit and
+    PostToolUse. Reads the hook's JSON, writes the note, says nothing: anything
+    printed here would be handed to the model as context."""
+    try:
+        payload = json.load(sys.stdin)
+    except ValueError:
+        payload = {}
+    cwd = payload.get("cwd") if isinstance(payload, dict) else None
+    write_context(args.tool, cwd or os.getcwd())
+    return 0
+
+
+def cmd_context(args) -> int:
+    note = write_context(args.source, str(Path(args.cwd).resolve()))
+    print(json.dumps(note))
+    return 0
+
+
+def cmd_doctor(_args) -> int:
+    failed = False
+
+    def say(ok, text):
+        nonlocal failed
+        failed = failed or ok is False
+        mark = {True: " ok ", False: "FAIL", None: "warn"}[ok]
+        print(f"[{mark}] {text}")
+
+    say(Path("/Applications/Hammerspoon.app").exists(), "Hammerspoon is installed")
+    up = hs_call("return 'up'") == "up"
+    say(
+        up,
+        "Hammerspoon answers over ipc"
+        if up
+        else "Hammerspoon does not answer over ipc (is it running, is hs.ipc loaded?)",
+    )
+    if up:
+        say(
+            hs_call("return tostring(hs.accessibilityState())") == "true",
+            "Hammerspoon has Accessibility (window titles need it)",
+        )
+        running = hs_call("return tostring(_G.zyt and _G.zyt.running)") == "true"
+        say(running, "the Spoon is running" if running else f"the Spoon is not running: is `{LOAD_LINE}` in init.lua?")
+        if running:
+            age = hs_call("return tostring(_G.zyt.state.open and (os.time() - _G.zyt.state.open.lastSeen) or 'closed')")
+            if age == "closed":
+                say(None, "no segment is open right now (away, or the rules see nothing)")
+            else:
+                say(int(age) < 120, f"the last tick was {age}s ago")
+            frame = hs_call("local m = _G.zyt.menubar; if not m then return 'none' end return tostring(m:frame().x)")
+            if frame not in (None, "none") and float(frame) < 0:
+                say(None, "the menu-bar item is parked off-screen, probably by a menu bar manager")
+    link = SPOONS / "Zyt.spoon"
+    say(link.exists(), f"{link} exists" if link.exists() else f"{link} is missing (zyt link)")
+    try:
+        rules = load_rules()
+        say(True, f"rules file read: {CONFIG}" if CONFIG.exists() else f"no rules file at {CONFIG}, defaults apply")
+        say(capacity(rules["report"]) > 0, f"a workday can hold {fmt_m(capacity(rules['report']))}")
+    except (ValueError, SystemExit) as error:
+        say(False, f"rules file: {error}")
+    rows = read_intervals(STATE / "intervals.csv")
+    say(
+        True,
+        f"{len(rows)} rows in {STATE / 'intervals.csv'}"
+        + (f", last ended {rows[-1].end:%d.%m. %H:%M}" if rows else ""),
+    )
+    return 1 if failed else 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="zyt", description=__doc__.split("\n\n")[1])
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("link", help="symlink the Spoon into ~/.hammerspoon/Spoons").set_defaults(run=cmd_link)
+    sub.add_parser("unlink", help="remove that symlink").set_defaults(run=cmd_unlink)
+    sub.add_parser("status", help="what is running now").set_defaults(run=cmd_status)
+    for name in ("work", "private", "auto"):
+        sub.add_parser(
+            name, help=f"pin the class to {name}" if name != "auto" else "let the rules decide"
+        ).set_defaults(run=cmd_switch)
+    for name, when in (("day", "YYYY-MM-DD"), ("week", "YYYY-Www")):
+        report = sub.add_parser(name, help=f"the recorded {name} and its booking proposal")
+        report.add_argument("when", nargs="?", metavar=when)
+        report.add_argument("--json", action="store_true")
+        report.set_defaults(run=cmd_report)
+    hook = sub.add_parser("hook", help="stdin hook for a coding tool (Claude Code)")
+    hook.add_argument("tool", choices=["claude-code"])
+    hook.set_defaults(run=cmd_hook)
+    context = sub.add_parser("context", help="note which directory a tool is working in")
+    context.add_argument("source")
+    context.add_argument("cwd", nargs="?", default=".")
+    context.set_defaults(run=cmd_context)
+    sub.add_parser("doctor", help="check the installation").set_defaults(run=cmd_doctor)
+    args = parser.parse_args(argv)
+    return args.run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
