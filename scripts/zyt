@@ -573,14 +573,21 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     found = git_remote(cwd) if remote is UNKNOWN else remote
     with locked(directory / SESSION_LOCK):
         before = read_note(path)
+        # Hooks reach the lock in whatever order the machine felt like, and one
+        # that waited on git can arrive behind a later event of its own session.
+        # So the merge decides and not the arrival: where the session is comes
+        # from the newest event to have written, an older one only fills in what
+        # the note does not say yet, and neither timestamp goes backwards.
+        newer = now >= (before.get("at") or 0)
+        remembered = before.get("remote")
         note = write_note(
             path,
             {
-                "at": now,
-                "promptAt": now if prompt else before.get("promptAt"),
-                "source": source,
-                "cwd": cwd,
-                "remote": found or before.get("remote"),
+                "at": max(now, before.get("at") or 0),
+                "promptAt": max(now if prompt else 0, before.get("promptAt") or 0) or None,
+                "source": source if newer else before.get("source"),
+                "cwd": cwd if newer else before.get("cwd"),
+                "remote": (found or remembered) if newer else (remembered or found),
                 "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
                 "session": session,
             },
