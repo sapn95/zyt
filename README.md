@@ -125,6 +125,35 @@ no room is printed as the leftover rather than dropped
 ([ADR 0006](docs/adr/0006-the-proposal-moves-minutes-it-never-makes-them.md)).
 `zyt day` is one day of the same; `--json` on either gives it to a script.
 
+## The board
+
+```sh
+zyt board                                      # this week, written and opened
+zyt board 2026-W38                             # another week
+zyt board 2026-09-14                           # one day on its own
+zyt board --out ~/Desktop/week.html --no-open
+```
+
+The same week, drawn instead of tabulated. Each day gets two lanes on one hour
+scale: above it what was recorded, work in blue and private in purple, below it
+the blocks the proposal would have you book. Hover a bar and it names its exact
+times. The scale covers the hours that may be booked and widens for anything
+outside them, so a Sunday evening shows up where it happened.
+
+```text
+            07   08   09   10   11   12   13   14   15   16   17   18
+Mon 14.09.       ████████████████████▓▓▓▓ ███████████████████     7h50 · 0h45 private
+                 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒       08:00–13:00 · 13:30–16:20
+```
+
+One file with a `<style>` in it and nothing else: no script, no font, no
+stylesheet, nothing fetched when it opens, and dark mode follows the system
+([ADR 0011](docs/adr/0011-the-board-is-one-file.md)). It goes to
+`~/.local/state/zyt/board.html` unless `--out` says otherwise, and the same file
+is overwritten every time, so a reload in the browser shows the latest. The
+browser it opens in is classified by your own rules like any other window: a
+board opened in one you have marked as work records work time.
+
 ## Install
 
 Hammerspoon has to be running, with `hs.ipc` loaded for the command line.
@@ -159,6 +188,7 @@ says whether it does.
 | `zyt status` | What is running, since when, and today's totals |
 | `zyt work` · `zyt private` · `zyt auto` | Pin the class, or let the rules decide |
 | `zyt week [2026-W38]` · `zyt day [2026-09-14]` | The record and the proposal, `--json` for a script |
+| `zyt board [2026-W38\|2026-09-14]` | The same, drawn as one HTML file, and opened |
 | `zyt hook claude-code` | The stdin hook for Claude Code |
 | `zyt context <source> [dir]` | Leave the same note from anything else |
 | `zyt link` · `zyt unlink` | Put the Spoon where Hammerspoon finds it, take it out |
