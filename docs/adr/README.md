@@ -1,0 +1,16 @@
+# Decision records
+
+One file per decision a reviewer would question. Each says what was chosen,
+why, and what was rejected. The last part is what tells the next person whether
+their idea was considered or simply missed.
+
+| | |
+| --- | --- |
+| [0001](0001-a-pure-core-and-a-thin-shell.md) | A pure core and a thin Hammerspoon shell |
+| [0002](0002-unknown-is-sticky-not-a-third-class.md) | An unknown window is sticky, not a third class |
+| [0003](0003-a-terminal-belongs-to-its-remote.md) | A terminal belongs to the remote of the repository in it |
+| [0004](0004-a-tool-says-where-it-is-working.md) | A coding tool says where it is working, through a hook |
+| [0005](0005-away-starts-at-the-last-input.md) | Away starts at the last input, not when it is noticed |
+| [0006](0006-the-proposal-moves-minutes-it-never-makes-them.md) | The booking proposal moves minutes, it never makes or loses them |
+| [0007](0007-the-command-line-is-python.md) | The command line is Python, the Spoon is Lua |
+| [0008](0008-the-rules-stay-out-of-the-repository.md) | The rules stay out of the repository |

@@ -1,0 +1,17 @@
+version: 2
+# One grouped pull request per ecosystem per week. Every update merges itself
+# once the checks are green — majors included; the `no-automerge` label is the
+# manual hold. See .github/workflows/dependabot-auto-merge.yml for both halves
+# of that, and https://github.com/sapn95/.github/blob/main/CI.md for the rest.
+#
+# github-actions is the only ecosystem here on purpose: the Lua rocks are
+# installed by name in CI and Hammerspoon supplies everything else. An entry
+# for an ecosystem this repository does not have is a promise about nothing.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -1,0 +1,7 @@
+.DS_Store
+luacov.stats.out
+luacov.report.out
+.luarocks/
+lua_modules/
+__pycache__/
+.ruff_cache/

@@ -1,0 +1,35 @@
+{
+  "defaultClass": "work",
+  "labels": { "work": "W", "private": "P", "away": "·" },
+  "tickSeconds": 30,
+  "idleSeconds": 600,
+  "signalSeconds": 300,
+  "noIdleApps": ["Microsoft Teams", "zoom.us"],
+  "repoRoots": ["~/git"],
+  "remotes": [
+    { "match": "git.example.com", "class": "work" },
+    { "match": "github.com", "class": "private" }
+  ],
+  "apps": {
+    "Microsoft Outlook": "work",
+    "Microsoft Teams": "work",
+    "Spotify": "private",
+    "iTerm2": "repo",
+    "Terminal": "repo",
+    "Code": "repo"
+  },
+  "titles": [
+    { "contains": "Jira", "class": "work" },
+    { "contains": "Confluence", "class": "work" },
+    { "contains": "GitHub", "class": "private" }
+  ],
+  "report": {
+    "workdays": [1, 2, 3, 4, 5],
+    "earliest": "07:00",
+    "latest": "20:00",
+    "maxBlockMinutes": 300,
+    "breakMinutes": 30,
+    "defaultStart": "08:00",
+    "fillEmptyDays": false
+  }
+}

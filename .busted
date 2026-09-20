@@ -1,0 +1,10 @@
+return {
+  _all = {
+    -- The Spoon is the package root, so `require("zyt.tracker")` resolves the
+    -- same way here as it does inside Hammerspoon.
+    lpath = "Zyt.spoon/?.lua;Zyt.spoon/?/init.lua",
+  },
+  default = {
+    verbose = true,
+  },
+}

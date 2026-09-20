@@ -1,0 +1,50 @@
+local rules = require("zyt.rules")
+
+describe("rules.normalise", function()
+  it("fills the defaults from an empty file", function()
+    local r = assert(rules.normalise({}, "/Users/me"))
+    assert.equals("work", r.defaultClass)
+    assert.equals(30, r.tickSeconds)
+    assert.same({ "/Users/me/git" }, r.repoRoots)
+    assert.same({ work = "W", private = "P", away = "·" }, r.labels)
+  end)
+
+  it("keeps what the file says and expands the home directory", function()
+    local r = assert(rules.normalise({
+      defaultClass = "private",
+      labels = { work = "A" },
+      repoRoots = { "~/code/", "/srv/git" },
+      noIdleApps = { "Teams" },
+      apps = { Mail = "work", iTerm2 = "repo" },
+      titles = { { contains = "Jira", class = "work" } },
+      remotes = { { match = "github.com", class = "private" } },
+    }, "/Users/me"))
+    assert.equals("private", r.defaultClass)
+    assert.equals("A", r.labels.work)
+    assert.equals("P", r.labels.private)
+    assert.same({ "/Users/me/code", "/srv/git" }, r.repoRoots)
+    assert.is_true(r.noIdleApps["Teams"])
+    assert.equals("repo", r.apps.iTerm2)
+    assert.same({ { contains = "Jira", class = "work" } }, r.titles)
+    assert.same({ { match = "github.com", class = "private" } }, r.remotes)
+  end)
+
+  it("names the field that is wrong", function()
+    local _, err = rules.normalise({ defaultClass = "fun" }, "/h")
+    assert.matches("defaultClass", err)
+    _, err = rules.normalise({ apps = { Mail = "sometimes" } }, "/h")
+    assert.matches('apps%["Mail"%]', err)
+    _, err = rules.normalise({ titles = { { class = "work" } } }, "/h")
+    assert.matches("titles%[1%]", err)
+    _, err = rules.normalise({ remotes = { { match = "x", class = "y" } } }, "/h")
+    assert.matches("remotes%[1%]", err)
+    _, err = rules.normalise({ tickSeconds = 0 }, "/h")
+    assert.matches("tickSeconds", err)
+    _, err = rules.normalise({ repoRoots = { 3 } }, "/h")
+    assert.matches("repoRoots%[1%]", err)
+    _, err = rules.normalise({ apps = "Mail" }, "/h")
+    assert.matches("apps", err)
+    _, err = rules.normalise("nope", "/h")
+    assert.matches("JSON object", err)
+  end)
+end)
