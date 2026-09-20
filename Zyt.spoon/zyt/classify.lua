@@ -57,33 +57,43 @@ function M.paths(title, home)
   return out
 end
 
-local function byRepository(rules, obs)
+--- The remote of the repository a `repo` application's window is about, and
+--- where it was found: its working directory, an absolute path in the title,
+--- a title word that names a checkout, or a fresh note from a tool hosted in
+--- this same application. Nil when none of them names a repository.
+function M.repositoryOf(rules, obs)
   if obs.cwd then
-    local class = M.remoteClass(rules, obs.resolve(obs.cwd))
-    if class then
-      return class, "cwd"
+    local remote = obs.resolve(obs.cwd)
+    if remote then
+      return remote, "cwd"
     end
   end
   for _, path in ipairs(M.paths(obs.title, rules.home)) do
-    local class = M.remoteClass(rules, obs.resolve(path))
-    if class then
-      return class, "path"
+    local remote = obs.resolve(path)
+    if remote then
+      return remote, "path"
     end
   end
   for _, token in ipairs(M.tokens(obs.title)) do
     for _, root in ipairs(rules.repoRoots) do
-      local class = M.remoteClass(rules, obs.resolve(root .. "/" .. token))
-      if class then
-        return class, "repo"
+      local remote = obs.resolve(root .. "/" .. token)
+      if remote then
+        return remote, "repo"
       end
     end
   end
   local signal = obs.signal
-  if fresh(rules, signal) and (signal.bundle == nil or signal.bundle == obs.bundle) then
-    local class = M.remoteClass(rules, signal.remote)
-    if class then
-      return class, "llm"
-    end
+  if fresh(rules, signal) and (signal.bundle == nil or signal.bundle == obs.bundle) and signal.remote then
+    return signal.remote, "llm"
+  end
+  return nil
+end
+
+local function byRepository(rules, obs)
+  local remote, how = M.repositoryOf(rules, obs)
+  local class = M.remoteClass(rules, remote)
+  if class then
+    return class, how
   end
   return nil
 end
