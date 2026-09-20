@@ -349,6 +349,29 @@ class Hook(unittest.TestCase):
             # temporary file left behind
             self.assertEqual(sorted(path.name for path in (state / "sessions").iterdir()), [".lock", "abc.json"])
 
+    def test_an_event_that_arrives_late_does_not_move_the_note_back(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            zyt.write_session("claude-code", "/now", "abc", True, remote="git@host:me/now.git", state=state, at=2000)
+            # the older event waited on git and got the lock second; it is still
+            # the older event, and says nothing about where the session is now
+            late = zyt.write_session(
+                "claude-code", "/then", "abc", True, remote="git@host:me/then.git", state=state, at=1000
+            )
+            self.assertEqual((late["at"], late["promptAt"]), (2000, 2000))
+            self.assertEqual(late["cwd"], "/now")
+            self.assertEqual(late["remote"], "git@host:me/now.git")
+
+    def test_a_late_event_still_fills_in_what_the_note_does_not_say(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            zyt.write_session("claude-code", "/now", "abc", False, remote=None, state=state, at=2000)
+            late = zyt.write_session(
+                "claude-code", "/then", "abc", True, remote="git@host:me/then.git", state=state, at=1000
+            )
+            self.assertEqual(late["remote"], "git@host:me/then.git")
+            self.assertEqual(late["promptAt"], 1000)  # it was still a prompt
+
     def test_the_lock_is_a_file_of_its_own_and_is_let_go_again(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sessions" / zyt.SESSION_LOCK
