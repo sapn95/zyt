@@ -36,7 +36,12 @@ the other had just learnt. Expired notes are dropped under the same lock, so
 one that looked stale cannot be deleted after the session it belongs to has
 written it again. The lock is never deleted, so it cannot be unlinked from under
 a hook that holds it, and one lock for the directory means there is nothing to
-decide about that.
+decide about that. Which hook reaches the lock first settles nothing else: where
+the session is comes from the newest event to have written, an older one that sat
+out a `git` call only fills in what the note does not say yet, and no timestamp
+goes backwards. A whole second cannot tell two of one session's hooks apart, so
+the note also carries the moment to the microsecond, and that is what the merge
+reads.
 
 **Agreement is certainty.** The Spoon reads every note, keeps the ones written
 by the application in front and typed into within `chatSeconds`, and asks the

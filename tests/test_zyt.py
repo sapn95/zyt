@@ -372,6 +372,19 @@ class Hook(unittest.TestCase):
             self.assertEqual(late["remote"], "git@host:me/then.git")
             self.assertEqual(late["promptAt"], 1000)  # it was still a prompt
 
+    def test_two_events_in_one_second_are_still_told_apart(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            zyt.write_session("claude-code", "/now", "abc", True, remote="git@host:me/now.git", state=state, at=2000.8)
+            # the same second, so `at` cannot separate them; the one that waited
+            # on git happened earlier all the same
+            late = zyt.write_session(
+                "claude-code", "/then", "abc", True, remote="git@host:me/then.git", state=state, at=2000.2
+            )
+            self.assertEqual(late["at"], 2000)
+            self.assertEqual(late["cwd"], "/now")
+            self.assertEqual(late["remote"], "git@host:me/now.git")
+
     def test_the_lock_is_a_file_of_its_own_and_is_let_go_again(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sessions" / zyt.SESSION_LOCK
