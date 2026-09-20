@@ -279,10 +279,16 @@ def period(when, single: bool) -> tuple:
     worked out through its whole week: a day's booking is the week's minutes
     dealt round, and the row for the day is then taken out of that."""
     today = dt.date.today()
-    if single:
-        day = dt.date.fromisoformat(when) if when else today
-        return day - dt.timedelta(days=day.weekday()), day
-    monday = parse_week(when) if when else today - dt.timedelta(days=today.weekday())
+    # A typo in a date is a thing the person can fix, so it is said in a line
+    # rather than raised as a traceback at them.
+    try:
+        if single:
+            day = dt.date.fromisoformat(when) if when else today
+            return day - dt.timedelta(days=day.weekday()), day
+        monday = parse_week(when) if when else today - dt.timedelta(days=today.weekday())
+    except ValueError:
+        wants = "a day, YYYY-MM-DD" if single else "a week, YYYY-Www"
+        raise SystemExit(f"{when}: no such date; it wants {wants}") from None
     return monday, None
 
 
