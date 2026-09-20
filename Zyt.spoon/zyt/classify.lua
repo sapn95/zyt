@@ -82,6 +82,12 @@ end
 --- the live chats straddle both classes, and nothing on screen says which
 --- panel is in front, so only the person can. `candidates` are the chats whose
 --- repository the rules do have a class for — the ones worth offering.
+---
+--- The newest chat is the pick even when the rules have no class for its
+--- repository, and then the caller ends up asking about that repository rather
+--- than reading the class off an older chat. That is on purpose: the person is
+--- in the chat they last typed into, and an answer about the repository they
+--- are actually in is true tomorrow as well.
 function M.chatOf(rules, obs)
   local chats = M.liveChats(rules, obs)
   if #chats == 0 then
