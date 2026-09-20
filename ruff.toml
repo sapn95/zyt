@@ -6,3 +6,7 @@ line-length = 120
 
 [lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+# SIM112 wants environment variables in capitals. macOS names the one the hook
+# reads `__CFBundleIdentifier`, and renaming it would read a variable that does
+# not exist.
+ignore = ["SIM112"]
