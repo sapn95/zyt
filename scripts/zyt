@@ -568,6 +568,9 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     directory = state / "sessions"
     path = directory / f"{session}.json"
     now = int(time.time()) if at is None else at
+    # Asked before the lock is taken. Git can sit out its whole timeout, and no
+    # other session's merge should have to wait behind that.
+    found = git_remote(cwd) if remote is UNKNOWN else remote
     with locked(directory / SESSION_LOCK):
         before = read_note(path)
         note = write_note(
@@ -577,12 +580,15 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
                 "promptAt": now if prompt else before.get("promptAt"),
                 "source": source,
                 "cwd": cwd,
-                "remote": (git_remote(cwd) if remote is UNKNOWN else remote) or before.get("remote"),
+                "remote": found or before.get("remote"),
                 "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
                 "session": session,
             },
         )
-    prune_sessions(directory, now)
+        # Under the same lock: a note this hook found stale can be written again
+        # by the session that owns it while the prune is still walking, and
+        # deleting it then would lose a live chat until it was next spoken to.
+        prune_sessions(directory, now)
     return note
 
 
