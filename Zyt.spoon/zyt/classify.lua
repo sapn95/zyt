@@ -59,8 +59,9 @@ end
 
 --- The remote of the repository a `repo` application's window is about, and
 --- where it was found: its working directory, an absolute path in the title,
---- a title word that names a checkout, or a fresh note from a tool hosted in
---- this same application. Nil when none of them names a repository.
+--- a title word that names a checkout, the chat the person last typed into in
+--- this same application, or a fresh note from any tool hosted in it. Nil
+--- when none of them names a repository.
 function M.repositoryOf(rules, obs)
   if obs.cwd then
     local remote = obs.resolve(obs.cwd)
@@ -81,6 +82,16 @@ function M.repositoryOf(rules, obs)
         return remote, "repo"
       end
     end
+  end
+  local chat = obs.chat
+  if
+    chat
+    and type(chat.age) == "number"
+    and chat.age <= rules.chatSeconds
+    and chat.bundle == obs.bundle
+    and chat.remote
+  then
+    return chat.remote, "chat"
   end
   local signal = obs.signal
   if fresh(rules, signal) and (signal.bundle == nil or signal.bundle == obs.bundle) and signal.remote then
@@ -114,7 +125,8 @@ end
 ---   obs.title    the focused window's title
 ---   obs.cwd      the working directory the application reported, if it can
 ---   obs.idle     seconds since the last input
----   obs.signal   { age = seconds, remote = url } left behind by a tool's hook
+---   obs.signal   { age = seconds, remote = url, bundle = id } left behind by a tool's hook
+---   obs.chat     the same, from the last prompt the person typed into a chat
 ---   obs.resolve  function(path) -> remote url or nil
 --- Returns class, source — or nil when nothing here has an opinion.
 ---

@@ -12,6 +12,7 @@ run.
 | `tickSeconds` | `30` | How often the screen is looked at; a switch to another application is looked at at once. Applied on **Reload the rules** |
 | `idleSeconds` | `600` | No input for this long ends the segment, backdated to the last input ([ADR 0005](adr/0005-away-starts-at-the-last-input.md)) |
 | `signalSeconds` | `300` | How long a coding tool's note counts: as presence, and as the class once nobody types ([ADR 0004](adr/0004-a-tool-says-where-it-is-working.md)) |
+| `chatSeconds` | `14400` | How long the chat the person last typed into speaks for the editor hosting it |
 | `noIdleApps` | `[]` | Applications in front of which idle time does not count: calls |
 | `repoRoots` | `["~/git"]` | Where a word from a window title is looked up as a directory |
 | `remotes` | `[]` | `{"match": "<substring of the remote URL>", "class": "work"\|"private"}`, first match wins |
@@ -58,7 +59,8 @@ How these turn a recorded week into a proposal is in
 | `~/.config/zyt/rules.json` | The rules |
 | `~/.local/state/zyt/intervals.csv` | One row per segment: `start,end,seconds,class,source,app` |
 | `~/.local/state/zyt/open.json` | The segment running now, rewritten every tick so a crash loses at most one tick |
-| `~/.local/state/zyt/context.json` | The last note a coding tool left |
+| `~/.local/state/zyt/context.json` | The last note a coding tool left: what some session is working on |
+| `~/.local/state/zyt/chat.json` | The last prompt the person typed: the chat they are talking to |
 | `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
 
 `$XDG_STATE_HOME` moves the state directory. Timestamps are local time with
