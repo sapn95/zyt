@@ -798,6 +798,23 @@ def read_note(path: Path) -> dict:
     return note if isinstance(note, dict) else {}
 
 
+def terminal_pane():
+    """Which pane of a terminal this process was started in, or None when the
+    terminal does not say. iTerm2 puts an id for the session into the
+    environment of every shell it opens, and everything started in that shell
+    inherits it, Claude Code and its hooks included: `w0t3p0:<uuid>`, where the
+    part before the colon moves when a tab is dragged and the part after it
+    belongs to that pane for as long as it is open. iTerm2 sets both names;
+    Terminal sets the second. The Spoon asks the terminal in front which pane is
+    selected, so the chat somebody is reading is known rather than guessed
+    ([ADR 0012](../docs/adr/0012-the-pane-in-front-is-the-chat.md))."""
+    for name in ("ITERM_SESSION_ID", "TERM_SESSION_ID"):
+        pane = (os.environ.get(name) or "").rsplit(":", 1)[-1].strip()
+        if pane:
+            return pane
+    return None
+
+
 def write_context(
     source: str, cwd: str, state=None, name: str = "context", session=None, remote=UNKNOWN, at=None
 ) -> dict:
@@ -816,6 +833,7 @@ def write_context(
             # Spoon applies the note to that application's windows and to no
             # other's.
             "bundle": os.environ.get("__CFBundleIdentifier"),
+            "pane": terminal_pane(),
             "session": session,
         },
     )
@@ -848,7 +866,9 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     working directory, and a prompt carries no file to go on, so without that
     memory the chat the person is typing into would be the one thing about them
     nobody knows. `promptAt` is when they last talked to it; a session that has
-    only ever worked is no chat and the Spoon skips it."""
+    only ever worked is no chat and the Spoon skips it. The note also names the
+    terminal pane the session was opened in, which is how four chats in four tabs
+    are told apart with nobody asked anything."""
     state = state or STATE
     if not isinstance(session, str) or not SESSION_NAME.match(session):
         return None
@@ -884,6 +904,10 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
                 "cwd": cwd if newer else before.get("cwd"),
                 "remote": (found or remembered) if newer else (remembered or found),
                 "bundle": os.environ.get("__CFBundleIdentifier") or before.get("bundle"),
+                # A pane is where the session was opened and it does not move, so
+                # the note keeps the one it knows rather than dropping it for an
+                # event that came from somewhere with nothing to say about panes.
+                "pane": terminal_pane() or before.get("pane"),
                 "session": session,
             },
         )
@@ -987,6 +1011,13 @@ def cmd_doctor(_args) -> int:
                 say(None, "the menu-bar item is parked off-screen, probably by a menu bar manager")
     link = SPOONS / "Zyt.spoon"
     say(link.exists(), f"{link} exists" if link.exists() else f"{link} is missing (zyt link)")
+    pane = terminal_pane()
+    say(
+        True if pane else None,
+        f"this terminal names its panes ({pane}): a chat started here is matched to the pane in front"
+        if pane
+        else "this terminal does not name its panes; chats started here are told apart by what they work on",
+    )
     try:
         rules = load_rules()
         say(True, f"rules file read: {CONFIG}" if CONFIG.exists() else f"no rules file at {CONFIG}, defaults apply")

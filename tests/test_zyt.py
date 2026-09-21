@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # The command has no .py extension, so it is loaded by path. It has to be in
 # sys.modules before it runs: dataclasses looks its module up there.
@@ -495,6 +496,29 @@ class Hook(unittest.TestCase):
             self.assertEqual(late["at"], 2000)
             self.assertEqual(late["cwd"], "/now")
             self.assertEqual(late["remote"], "git@host:me/now.git")
+
+    def test_the_note_names_the_terminal_pane_it_was_opened_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            with mock.patch.dict(os.environ, {"ITERM_SESSION_ID": "w0t3p0:PANE-A"}):
+                note = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state)
+                self.assertEqual(note["pane"], "PANE-A")
+                self.assertEqual(zyt.write_context("claude-code", tmp, state, remote=None)["pane"], "PANE-A")
+            # the pane a session was opened in does not change, so an event from
+            # somewhere with nothing to say about panes does not unset it
+            with mock.patch.dict(os.environ, {}, clear=True):
+                later = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state)
+                self.assertEqual(later["pane"], "PANE-A")
+                self.assertIsNone(zyt.write_context("claude-code", tmp, state, remote=None)["pane"])
+
+    def test_a_terminal_that_says_nothing_about_panes_leaves_the_field_empty(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(zyt.terminal_pane())
+        with mock.patch.dict(os.environ, {"ITERM_SESSION_ID": "", "TERM_SESSION_ID": "w0t0p0:PANE-B"}):
+            self.assertEqual(zyt.terminal_pane(), "PANE-B")
+        # no colon in it, and the whole value is the pane
+        with mock.patch.dict(os.environ, {"ITERM_SESSION_ID": "PANE-C"}):
+            self.assertEqual(zyt.terminal_pane(), "PANE-C")
 
     def test_the_lock_is_a_file_of_its_own_and_is_let_go_again(self):
         with tempfile.TemporaryDirectory() as tmp:

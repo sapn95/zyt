@@ -29,6 +29,16 @@ minutes) and the screen is unlocked; a lock takes it down.
 The rules file keeps the answers that should be versioned and explained; the
 learned file holds the rest. Moving an answer from one to the other is a copy.
 
+**Forgetting has two scopes.** An answer that turns out wrong is nearly always
+the one about the window in front, and having to drop every answer ever given to
+fix it costs a day of being asked about Finder and the login window again. So the
+menu offers both, and the narrow one names what it will forget — the repository
+or the application the menu-bar item is about at that moment. It takes the chat
+named for that application with it
+([ADR 0010](0010-which-chat-of-several.md)): both are answers about the same
+window, and forgetting one while keeping the other leaves the window classified
+by whichever was kept, which is the confusing half of a fix.
+
 ## What was rejected
 
 Asking with a modal dialog. It stops the timer and the watchers while it
