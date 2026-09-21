@@ -60,6 +60,15 @@ obj.cli = "zyt"
 --- terminals whose title does not say. iTerm2 is answered over AppleScript.
 obj.cwdOf = nil
 
+--- Zyt.paneOf
+--- Variable
+--- Per application, a function that returns the id of the pane it has in front,
+--- matched against the pane a chat says it was opened in. iTerm2 is answered
+--- over AppleScript; a terminal that keeps that to itself is left out and its
+--- chats are told apart by what they work on
+--- ([ADR 0012](../docs/adr/0012-the-pane-in-front-is-the-chat.md)).
+obj.paneOf = nil
+
 obj.logger = hs.logger.new("zyt", "info")
 obj.running = false
 obj.override = nil
@@ -206,14 +215,25 @@ local function shortRepo(remote)
   return (remote:gsub("%.git$", "")):match("([^/:]+)$") or remote
 end
 
-local function iterm2Path()
-  local ok, out = hs.osascript.applescript(
-    'tell application "iTerm2" to tell current session of current window to get variable named "session.path"'
-  )
+local function applescript(script)
+  local ok, out = hs.osascript.applescript(script)
   if ok and type(out) == "string" and out ~= "" then
     return out
   end
   return nil
+end
+
+local function iterm2Path()
+  return applescript(
+    'tell application "iTerm2" to tell current session of current window to get variable named "session.path"'
+  )
+end
+
+--- Which pane of iTerm2 is in front, by the same id it puts in the environment
+--- of every shell it opens there. A chat opened in that pane wrote the id into
+--- its note, so the two meet and the chat in front is known (ADR 0012).
+local function iterm2Pane()
+  return applescript('tell application "iTerm2" to tell current session of current window to get unique ID')
 end
 
 function obj:note(name)
@@ -227,6 +247,7 @@ function obj:note(name)
     remote = decoded.remote,
     source = decoded.source,
     bundle = decoded.bundle,
+    pane = decoded.pane,
   }
 end
 
@@ -269,6 +290,7 @@ function obj:chats()
             remote = decoded.remote,
             source = decoded.source,
             bundle = decoded.bundle,
+            pane = decoded.pane,
             session = decoded.session,
           }
         end
@@ -310,6 +332,7 @@ function obj:observe(now)
     return { class = self.override, source = "manual", app = app }
   end
   local cwdOf = self.cwdOf[app]
+  local paneOf = self.paneOf[app]
   local chats = self:chats()
   local obs = {
     app = app,
@@ -317,20 +340,48 @@ function obj:observe(now)
     title = title,
     idle = idle,
     cwd = cwdOf and cwdOf() or nil,
+    pane = paneOf and paneOf() or nil,
     signal = signal,
     chats = chats,
     chosen = self:stillChosen(bundle, chats),
     resolve = self.resolve,
   }
-  self.seen = { app = app, bundle = bundle, chats = classify.liveChats(self.rules, obs) }
+  local key, remote = self:about(obs)
+  local inPane = classify.paneChat(self.rules, obs)
+  self.seen = {
+    app = app,
+    bundle = bundle,
+    chats = classify.liveChats(self.rules, obs),
+    inPane = inPane and inPane.session or nil,
+    key = key,
+    about = remote and shortRepo(remote) or app,
+  }
   local class, source, unsure = classify.decide(self.rules, obs)
   if unsure then
     self:askWhich(now, obs)
   end
   if not class then
-    class, source = self:recall(now, obs)
+    class, source = self:recall(now, obs, key, remote)
   end
   return { class = class, source = source, app = app }
+end
+
+--- What an answer about the window in front would be filed under, and the
+--- repository it is about when there is one. Worked out on every tick and not
+--- only when a question is due, because the menu offers to forget this one
+--- answer and has to be able to say whose it is.
+function obj:about(obs)
+  local remote
+  if self.rules.apps[obs.app or ""] == "repo" then
+    remote = classify.repositoryOf(self.rules, obs)
+  end
+  return learned.key(remote, obs.app), remote
+end
+
+--- The cooldown on asking which chat somebody is in is per application, the
+--- same as the chat they named, so that forgetting one answer clears both.
+local function chatKey(bundle)
+  return "chat:" .. (bundle or "")
 end
 
 --- The chat the person named for this application, while that choice still
@@ -367,12 +418,7 @@ end
 --- What the person answered the last time this window came up, or a fresh
 --- question when nothing is known yet. Nil while the answer is pending: the
 --- tracker keeps whatever was running (ADR 0002).
-function obj:recall(now, obs)
-  local remote
-  if self.rules.apps[obs.app or ""] == "repo" then
-    remote = classify.repositoryOf(self.rules, obs)
-  end
-  local key = learned.key(remote, obs.app)
+function obj:recall(now, obs, key, remote)
   local answer = learned.lookup(self.learned, key)
   if answer == "work" or answer == "private" then
     return answer, "learned"
@@ -406,7 +452,9 @@ end
 --- as the buttons, at most once per cooldown and only while somebody is there
 --- to answer. Until they do, the class is the chat they last typed into.
 function obj:askWhich(now, obs)
-  local key = "chat:" .. (obs.bundle or obs.app or "")
+  -- Keyed the way the named chat itself is, by the application hosting it, so
+  -- that forgetting one answer clears both.
+  local key = chatKey(obs.bundle)
   if not self.rules.prompt.enabled or not idleIsShort(obs.idle) then
     return
   end
@@ -451,11 +499,26 @@ function obj:saveLearned()
   writeAtomically(self.statePath .. "/learned.json", hs.json.encode(self.learned, true))
 end
 
-function obj:forget()
-  self.learned = {}
-  self.asked = {}
-  self.chosen = {}
-  os.remove(self.statePath .. "/learned.json")
+--- Zyt:forget([key, bundle])
+--- Method
+--- Drop one answer, or all of them. With a `key` it is the answer filed under
+--- that key, and with it the chat named for `bundle` and the cooldowns on both:
+--- those are answers about the same window, and forgetting one while keeping the
+--- other would leave it classified by whichever was kept. With no arguments
+--- every answer goes.
+function obj:forget(key, bundle)
+  if key then
+    self.learned[key] = nil
+    self.asked[key] = nil
+    self.chosen[bundle or ""] = nil
+    self.asked[chatKey(bundle)] = nil
+    self:saveLearned()
+  else
+    self.learned = {}
+    self.asked = {}
+    self.chosen = {}
+    os.remove(self.statePath .. "/learned.json")
+  end
   self:tick()
 end
 
@@ -697,20 +760,49 @@ function obj:chatMenu()
   local choice = self.chosen[seen.bundle or ""]
   local items = { { title = "-" }, { title = "Which chat in " .. (seen.app or "?") .. "?", disabled = true } }
   for _, chat in ipairs(chats) do
+    -- The chat in the pane the terminal says is in front is ticked without
+    -- anybody having picked it: it is not a choice, it is where they are. While
+    -- the pane answers, an older pick about another one of them is not shown as
+    -- if it still counted.
+    local inFront = seen.inPane ~= nil and seen.inPane == chat.session
+    local picked = seen.inPane == nil and choice ~= nil and choice.session == chat.session
     items[#items + 1] = {
       title = ("%s · %s · typed %s"):format(
-        shortRepo(chat.remote),
+        shortRepo(chat.remote) .. (inFront and " (in front)" or ""),
         classify.remoteClass(self.rules, chat.remote) or "unknown",
         os.date("%H:%M", chat.promptAt)
       ),
       indent = 1,
-      checked = choice ~= nil and choice.session == chat.session,
+      checked = inFront or picked,
       disabled = type(chat.session) ~= "string",
       fn = function()
         self:choose(seen.bundle, chat.session)
       end,
     }
   end
+  return items
+end
+
+--- Forgetting has two scopes, because "forget that" is usually about the window
+--- in front and not about every answer ever given. The narrow one names what it
+--- will drop, so there is nothing to find out by clicking it.
+function obj:forgetMenu()
+  local seen = self.seen or {}
+  local items = {}
+  if seen.key then
+    items[#items + 1] = {
+      title = ("Only for %s"):format(seen.about or "this window"),
+      fn = function()
+        self:forget(seen.key, seen.bundle)
+      end,
+    }
+  end
+  items[#items + 1] = {
+    title = "All of them",
+    fn = function()
+      self:forget()
+    end,
+  }
   return items
 end
 
@@ -756,9 +848,7 @@ function obj:menu()
     },
     {
       title = "Forget the answers, ask again",
-      fn = function()
-        self:forget()
-      end,
+      menu = self:forgetMenu(),
     },
   }
   for _, item in ipairs(self:chatMenu()) do
@@ -840,6 +930,7 @@ function obj:start()
   self:loadLearned()
   self.resolve = repo.resolver(repo.fs, 600, os.time)
   self.cwdOf = self.cwdOf or { iTerm2 = iterm2Path }
+  self.paneOf = self.paneOf or { iTerm2 = iterm2Pane }
   local checkout = self.spoonPath .. "../scripts/zyt"
   if self.cli == "zyt" and hs.fs.attributes(checkout, "mode") then
     self.cli = checkout

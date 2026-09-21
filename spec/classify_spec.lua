@@ -168,6 +168,62 @@ describe("classify.decide", function()
       assert.is_nil(classify.chatOf(R, { bundle = "b", chats = {} }))
     end)
 
+    it("takes the chat in the pane the terminal says is in front", function()
+      local work = {
+        age = 60,
+        promptAt = 200,
+        session = "w",
+        pane = "PANE-A",
+        remote = "ssh://git@git.example.com:7999/team/infra.git",
+        bundle = "com.googlecode.iterm2",
+      }
+      local other = {
+        age = 30,
+        promptAt = 300,
+        session = "p",
+        pane = "PANE-B",
+        remote = "git@github.com:me/budget.git",
+        bundle = "com.googlecode.iterm2",
+      }
+      -- the tab in front holds the work chat, while the window title names the
+      -- other checkout and the shell still sits where it was opened
+      local obs = {
+        app = "iTerm2",
+        bundle = "com.googlecode.iterm2",
+        title = "me@mac: budget (claude)",
+        cwd = "/Users/me/git/budget",
+        pane = "PANE-A",
+        chats = { other, work },
+      }
+      -- two values and no third: nothing is unsure, so nobody is asked
+      assert.same({ "work", "pane" }, { decide(obs) })
+      obs.pane = "PANE-B"
+      assert.same({ "private", "pane" }, { decide(obs) })
+      -- a pane no chat was opened in leaves the old order in charge
+      obs.pane = "PANE-C"
+      assert.same({ "private", "cwd" }, { decide(obs) })
+    end)
+
+    it("takes the newest of two chats that shared one pane, or the one picked out of them", function()
+      local older = {
+        age = 300,
+        promptAt = 100,
+        session = "o",
+        pane = "P",
+        remote = "ssh://git@git.example.com:7999/team/infra.git",
+        bundle = "b",
+      }
+      local newer =
+        { age = 60, promptAt = 200, session = "n", pane = "P", remote = "git@github.com:me/budget.git", bundle = "b" }
+      local obs = { app = "iTerm2", bundle = "b", title = "", pane = "P", chats = { newer, older } }
+      assert.same({ "private", "pane" }, { decide(obs) })
+      obs.chosen = "o"
+      assert.same({ "work", "pane" }, { decide(obs) })
+      -- a chat picked in another pane says nothing about this one
+      obs.chosen = "elsewhere"
+      assert.same({ "private", "pane" }, { decide(obs) })
+    end)
+
     it("applies the note to the application that wrote it and to no other", function()
       local signal = { age = 60, remote = "git@github.com:me/budget.git", bundle = "com.microsoft.VSCode" }
       assert.same(
@@ -222,6 +278,33 @@ describe("classify.repositoryOf", function()
     )
     assert.is_nil(classify.decide(R, { app = "iTerm2", title = "", cwd = "/Users/me/git/gadget", resolve = unknown }))
     assert.is_nil(classify.repositoryOf(R, { app = "iTerm2", title = "nothing", resolve = unknown }))
+  end)
+end)
+
+describe("classify.paneChat", function()
+  local chat = {
+    age = 60,
+    promptAt = 100,
+    session = "s",
+    pane = "P",
+    remote = "git@github.com:me/budget.git",
+    bundle = "b",
+  }
+
+  it("matches a chat to the pane it was opened in", function()
+    assert.equal("s", classify.paneChat(R, { bundle = "b", pane = "P", chats = { chat } }).session)
+  end)
+
+  it("needs a pane on both sides, and the same application", function()
+    assert.is_nil(classify.paneChat(R, { bundle = "b", chats = { chat } }))
+    assert.is_nil(classify.paneChat(R, { bundle = "b", pane = "", chats = { chat } }))
+    assert.is_nil(classify.paneChat(R, { bundle = "b", pane = "Q", chats = { chat } }))
+    assert.is_nil(classify.paneChat(R, { bundle = "elsewhere", pane = "P", chats = { chat } }))
+  end)
+
+  it("ignores a chat nobody has spoken to for longer than chatSeconds", function()
+    local stale = { age = 99999, promptAt = 1, session = "s", pane = "P", remote = chat.remote, bundle = "b" }
+    assert.is_nil(classify.paneChat(R, { bundle = "b", pane = "P", chats = { stale } }))
   end)
 end)
 

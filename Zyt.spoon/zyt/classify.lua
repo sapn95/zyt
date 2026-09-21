@@ -48,7 +48,10 @@ end
 --- set to name the active file's folder is classified from that folder.
 function M.paths(title, home)
   local out = {}
-  for path in (title or ""):gmatch("~?/%S+") do
+  -- Copied into a local of its own: from Lua 5.5 on, the variable a generic for
+  -- loop hands out is a constant, and Hammerspoon will get there.
+  for found in (title or ""):gmatch("~?/%S+") do
+    local path = found
     if path:sub(1, 1) == "~" then
       path = (home or "") .. path:sub(2)
     end
@@ -75,7 +78,32 @@ function M.liveChats(rules, obs)
   return out
 end
 
---- Which of the live chats the person is in. The one they picked by hand wins;
+--- The chat in the pane the terminal says is in front, or nil when there is
+--- none. A terminal knows which of its panes is selected and it gives every
+--- shell it opens an id for that pane, which a tool started there carries into
+--- its note: four chats in four tabs are then told apart by the terminal itself
+--- and nobody has to be asked. One pane can have held two sessions, one after
+--- the other; then it is the one last spoken to, or the one the person picked
+--- out of them by hand. A pick naming a chat in another pane is not an answer
+--- about this one.
+function M.paneChat(rules, obs)
+  if type(obs.pane) ~= "string" or obs.pane == "" then
+    return nil
+  end
+  local found
+  for _, chat in ipairs(M.liveChats(rules, obs)) do
+    if chat.pane == obs.pane then
+      if obs.chosen and chat.session == obs.chosen then
+        return chat
+      end
+      found = found or chat
+    end
+  end
+  return found
+end
+
+--- Which of the live chats the person is in. The pane in front settles it when
+--- the terminal named one; otherwise the chat they picked by hand wins, and
 --- otherwise the one they typed into last.
 ---
 --- Returns remote, unsure, candidates. `unsure` says the answer is a guess:
@@ -93,9 +121,13 @@ function M.chatOf(rules, obs)
   if #chats == 0 then
     return nil
   end
-  local pick, candidates, seen, kinds = chats[1], {}, {}, 0
+  -- A choice made by hand is an answer about an afternoon; the pane is where
+  -- the person is right now. Nothing they could say beats the terminal saying
+  -- which of its panes they are looking at.
+  local inPane = M.paneChat(rules, obs)
+  local pick, candidates, seen, kinds = inPane or chats[1], {}, {}, 0
   for _, chat in ipairs(chats) do
-    if obs.chosen and chat.session == obs.chosen then
+    if not inPane and obs.chosen and chat.session == obs.chosen then
       pick = chat
     end
     local class = M.remoteClass(rules, chat.remote)
@@ -107,7 +139,7 @@ function M.chatOf(rules, obs)
       end
     end
   end
-  local told = obs.chosen ~= nil and pick.session == obs.chosen
+  local told = inPane ~= nil or (obs.chosen ~= nil and pick.session == obs.chosen)
   local unsure
   if kinds > 1 and not told then
     unsure = true
@@ -116,12 +148,23 @@ function M.chatOf(rules, obs)
 end
 
 --- The remote of the repository a `repo` application's window is about, and
---- where it was found: its working directory, an absolute path in the title,
---- a title word that names a checkout, the chat the person is in out of the
---- ones hosted here, or a fresh note from any tool hosted in it. Nil when
---- none of them names a repository. The third value is true when the chat was
---- picked out of several that disagree.
+--- where it was found: the chat in the pane the terminal says is in front, its
+--- working directory, an absolute path in the title, a title word that names a
+--- checkout, the chat the person is in out of the ones hosted here, or a fresh
+--- note from any tool hosted in it. Nil when none of them names a repository.
+--- The third value is true when the chat was picked out of several that
+--- disagree.
 function M.repositoryOf(rules, obs)
+  -- The pane is the one thing here nobody has to interpret: the terminal said
+  -- which of its panes is selected, and the session opened in that pane said
+  -- what it is working on. A word in the window title that happens to name
+  -- another checkout, or a shell still sitting in the directory it was opened
+  -- in, are both weaker than that, and until the pane was asked they were what
+  -- a terminal full of chats was classified by.
+  local inPane = M.paneChat(rules, obs)
+  if inPane then
+    return inPane.remote, "pane"
+  end
   if obs.cwd then
     local remote = obs.resolve(obs.cwd)
     if remote then
@@ -177,9 +220,10 @@ end
 ---   obs.bundle   its bundle id, matched against the one a tool's note names
 ---   obs.title    the focused window's title
 ---   obs.cwd      the working directory the application reported, if it can
+---   obs.pane     the id of the pane a terminal says is in front, if it says
 ---   obs.idle     seconds since the last input
 ---   obs.signal   { age = seconds, remote = url, bundle = id } left behind by a tool's hook
----   obs.chats    the same per chat session, plus promptAt and session, newest prompt first
+---   obs.chats    the same per chat session, plus promptAt, session and pane, newest prompt first
 ---   obs.chosen   the session id the person named as the chat they are in
 ---   obs.resolve  function(path) -> remote url or nil
 --- Returns class, source, unsure — or nil when nothing here has an opinion.
