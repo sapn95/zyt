@@ -17,3 +17,4 @@ their idea was considered or simply missed.
 | [0009](0009-ask-once-and-remember.md) | Ask once, and remember the answer |
 | [0010](0010-which-chat-of-several.md) | Which chat, out of the several open in one editor |
 | [0011](0011-the-board-is-one-file.md) | The board is one file, with no script in it and nothing to fetch |
+| [0012](0012-the-pane-in-front-is-the-chat.md) | The pane in front is the chat, and the terminal says which |

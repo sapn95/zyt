@@ -49,7 +49,10 @@ rules for each. When they all come out the same class, that is the class, and
 which panel is in front stops mattering. Two chats in employer repositories are
 work whichever one is being read.
 
-**Disagreement is a question, not a guess.** When the live chats straddle both
+**Disagreement is a question, not a guess** — where nothing can know which panel
+is in front. A terminal does know, and
+[ADR 0012](0012-the-pane-in-front-is-the-chat.md) asks it, so what follows is
+about the editors that do not. When the live chats straddle both
 classes the panel from [ADR 0009](0009-ask-once-and-remember.md) opens with the
 repositories as its buttons — `zyt` or `budget`, not Work or Private, because
 the class is already known for each and the open question is which of them the

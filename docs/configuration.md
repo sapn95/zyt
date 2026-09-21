@@ -28,11 +28,13 @@ run.
    class of that tool's repository.
 3. `apps[<frontmost application>]` when it is `work` or `private`.
 4. For an application marked `repo`: the remote of the repository it is in,
-   found from its working directory, from an absolute path in its title, from
-   a word in its title that names a checkout, from the chats open in it, or
-   from a recent tool note written from inside that same application, in that
-   order ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)). Chats that
-   disagree are a question, not a guess
+   found from the chat in the pane a terminal says is in front
+   ([ADR 0012](adr/0012-the-pane-in-front-is-the-chat.md)), from its working
+   directory, from an absolute path in its title, from a word in its title that
+   names a checkout, from the chats open in it, or from a recent tool note
+   written from inside that same application, in that order
+   ([ADR 0003](adr/0003-a-terminal-belongs-to-its-remote.md)). Chats that
+   disagree, where no pane can say, are a question and not a guess
    ([ADR 0010](adr/0010-which-chat-of-several.md)).
 5. The first `titles` rule whose text is in the window title.
 6. An answer given earlier for this repository or application.
@@ -63,7 +65,7 @@ How these turn a recorded week into a proposal is in
 | `~/.local/state/zyt/open.json` | The segment running now, rewritten every tick so a crash loses at most one tick |
 | `~/.local/state/zyt/context.json` | The last note a coding tool left: what some session is working on |
 | `~/.local/state/zyt/chat.json` | The last prompt the person typed: the chat they are talking to |
-| `~/.local/state/zyt/sessions/<id>.json` | One per chat session: when it was last worked in and last typed into, and the repository it last touched ([ADR 0010](adr/0010-which-chat-of-several.md)) |
+| `~/.local/state/zyt/sessions/<id>.json` | One per chat session: when it was last worked in and last typed into, the repository it last touched ([ADR 0010](adr/0010-which-chat-of-several.md)) and the terminal pane it was opened in ([ADR 0012](adr/0012-the-pane-in-front-is-the-chat.md)) |
 | `~/.local/state/zyt/sessions/.lock` | Empty, and held while the notes are merged and the expired ones dropped, so two hooks cannot undo each other |
 | `~/.local/state/zyt/learned.json` | The answers given to the panel, `"remote:<url>"` or `"app:<name>"` to `work`, `private` or `inherit` |
 | `~/.local/state/zyt/board.html` | The last board `zyt board` drew, overwritten each time unless `--out` says otherwise ([ADR 0011](adr/0011-the-board-is-one-file.md)) |

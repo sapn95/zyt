@@ -25,7 +25,7 @@ W                          ← the menu-bar item: work is running
 ├─ ────────────
 ├─ Open the rules file
 ├─ Reload the rules
-├─ Forget the answers, ask again
+├─ Forget the answers, ask again ▸   → only this one, or all of them
 ├─ ────────────
 └─ Quit zyt
 ```
@@ -41,8 +41,10 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    the rules file says which is which.
 3. **The repository, for terminals and editors.** An application marked
    `repo` is classified by the git remote of the repository it is in:
-   `github.com` is private, the employer's git host is work. The directory
-   comes from the application itself (iTerm2 says over AppleScript), from a
+   `github.com` is private, the employer's git host is work. The repository
+   comes from the chat in the pane the terminal says is in front
+   ([ADR 0012](docs/adr/0012-the-pane-in-front-is-the-chat.md)), from the
+   application's own working directory (iTerm2 says over AppleScript), from a
    word in the window title that names a checkout, or from a note a coding
    tool left behind ([ADR 0003](docs/adr/0003-a-terminal-belongs-to-its-remote.md)).
 4. **The title.** `Jira` and `Confluence` are work, `GitHub` is not, whatever
@@ -62,7 +64,9 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    application and never asked again; until it is answered, and for a Finder
    window you told it not to ask about, what was already running keeps running
    ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md),
-   [ADR 0009](docs/adr/0009-ask-once-and-remember.md)).
+   [ADR 0009](docs/adr/0009-ask-once-and-remember.md)). An answer that turns out
+   wrong is forgotten from the menu, either only for what is in front — the menu
+   names it — or all of them at once.
 
 A lock, sleep, or ten minutes without input end the segment, backdated to the
 last keystroke so the idle minutes are in no row at all. A call in Teams or
@@ -89,6 +93,13 @@ whichever panel you are reading. When they straddle both, zyt asks which chat
 you are in and puts the repositories on the buttons: nothing on screen can say,
 because the editor does not expose its panels. The same list is in the menu
 ([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
+
+A terminal is the exception, because it knows. It gives every shell it opens an
+id for the pane it opened it in, the hook writes that id into the note, and it
+answers which pane is in front when it is asked. Four chats in four tabs are then
+told apart by the terminal itself: switching tabs between an employer repository
+and a private one changes the class and asks nothing
+([ADR 0012](docs/adr/0012-the-pane-in-front-is-the-chat.md)).
 
 ```json
 "hooks": {
