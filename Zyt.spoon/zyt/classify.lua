@@ -78,6 +78,18 @@ function M.liveChats(rules, obs)
   return out
 end
 
+--- A pane id with any window and tab in front of it taken off. iTerm2 puts
+--- `w0t3p0:<uuid>` into the environment of a shell, where only the part after
+--- the colon belongs to the pane, and answers with that part on its own when it
+--- is asked which pane is in front. Both ends are cut to the same shape here,
+--- where they are compared, so that no adapter has to remember to.
+function M.paneId(pane)
+  if type(pane) ~= "string" then
+    return nil
+  end
+  return pane:match("([^:]+)$")
+end
+
 --- The chat in the pane the terminal says is in front, or nil when there is
 --- none. A terminal knows which of its panes is selected and it gives every
 --- shell it opens an id for that pane, which a tool started there carries into
@@ -87,12 +99,13 @@ end
 --- out of them by hand. A pick naming a chat in another pane is not an answer
 --- about this one.
 function M.paneChat(rules, obs)
-  if type(obs.pane) ~= "string" or obs.pane == "" then
+  local pane = M.paneId(obs.pane)
+  if not pane then
     return nil
   end
   local found
   for _, chat in ipairs(M.liveChats(rules, obs)) do
-    if chat.pane == obs.pane then
+    if M.paneId(chat.pane) == pane then
       if obs.chosen and chat.session == obs.chosen then
         return chat
       end
