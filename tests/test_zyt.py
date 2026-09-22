@@ -329,6 +329,39 @@ class Board(unittest.TestCase):
                 zyt.sys.stdout = out
                 zyt.STATE, zyt.CONFIG = state, config
 
+    def test_a_browser_that_would_not_start_is_said_in_a_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config, out, err = zyt.STATE, zyt.CONFIG, zyt.sys.stdout, zyt.sys.stderr
+            run = zyt.subprocess.run
+            zyt.STATE = Path(tmp) / "state"
+            zyt.CONFIG = Path(tmp) / "rules.json"
+            zyt.STATE.mkdir()
+            (zyt.STATE / "intervals.csv").write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T08:00:00+02:00,2026-09-14T12:00:00+02:00,14400,work,app,Mail\n"
+            )
+            page = Path(tmp) / "board.html"
+            asked = []
+
+            def refused(argv, **_):
+                asked.append(argv)
+                return zyt.subprocess.CompletedProcess(argv, 1)
+
+            try:
+                zyt.sys.stdout, zyt.sys.stderr = io.StringIO(), io.StringIO()
+                zyt.subprocess.run = refused
+                self.assertEqual(zyt.main(["board", "2026-W38", "--out", str(page)]), 0)
+                self.assertEqual(asked, [["open", str(page)]])
+                self.assertIn("could not open it", zyt.sys.stderr.getvalue())
+                # one that did start leaves stderr empty
+                zyt.subprocess.run = lambda argv, **_: zyt.subprocess.CompletedProcess(argv, 0)
+                zyt.sys.stderr = io.StringIO()
+                self.assertEqual(zyt.main(["board", "2026-W38", "--out", str(page)]), 0)
+                self.assertEqual(zyt.sys.stderr.getvalue(), "")
+            finally:
+                zyt.sys.stdout, zyt.sys.stderr, zyt.subprocess.run = out, err, run
+                zyt.STATE, zyt.CONFIG = state, config
+
 
 class Intervals(unittest.TestCase):
     def test_rows_are_read_and_bad_ones_skipped(self):
