@@ -295,6 +295,15 @@ describe("classify.paneChat", function()
     assert.equal("s", classify.paneChat(R, { bundle = "b", pane = "P", chats = { chat } }).session)
   end)
 
+  it("cuts the window and tab off both ends before comparing them", function()
+    -- the environment says w0t3p0:P and AppleScript says P, or the other way
+    -- round if an adapter hands back what it was given
+    assert.equal("s", classify.paneChat(R, { bundle = "b", pane = "w0t3p0:P", chats = { chat } }).session)
+    local prefixed = { age = 60, promptAt = 100, session = "s", pane = "w0t3p0:P", remote = chat.remote, bundle = "b" }
+    assert.equal("s", classify.paneChat(R, { bundle = "b", pane = "P", chats = { prefixed } }).session)
+    assert.is_nil(classify.paneChat(R, { bundle = "b", pane = "w0t3p0:Q", chats = { chat } }))
+  end)
+
   it("needs a pane on both sides, and the same application", function()
     assert.is_nil(classify.paneChat(R, { bundle = "b", chats = { chat } }))
     assert.is_nil(classify.paneChat(R, { bundle = "b", pane = "", chats = { chat } }))

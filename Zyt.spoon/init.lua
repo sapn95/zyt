@@ -328,9 +328,29 @@ function obj:observe(now)
   if away then
     return { away = true, awaySince = awaySince, app = app }
   end
+  -- Looked at while a pin is running too. A pin says whose time it is and
+  -- nothing else, and the menu is built from what was last seen: it names the
+  -- answer it offers to forget and lists the chats of the window in front, and
+  -- both would otherwise be whatever happened to be there when the pin went on.
+  local obs, key, remote = self:look(app, title, bundle, idle, signal)
   if self.override then
     return { class = self.override, source = "manual", app = app }
   end
+  local class, source, unsure = classify.decide(self.rules, obs)
+  if unsure then
+    self:askWhich(now, obs)
+  end
+  if not class then
+    class, source = self:recall(now, obs, key, remote)
+  end
+  return { class = class, source = source, app = app }
+end
+
+--- What is in front, in the shape the pure core reads, plus the key an answer
+--- about it would be filed under and the repository it is about. `seen` is
+--- brought up to date on the way, because the menu is put together between
+--- ticks out of whatever was seen last.
+function obj:look(app, title, bundle, idle, signal)
   local cwdOf = self.cwdOf[app]
   local paneOf = self.paneOf[app]
   local chats = self:chats()
@@ -356,14 +376,7 @@ function obj:observe(now)
     key = key,
     about = remote and shortRepo(remote) or app,
   }
-  local class, source, unsure = classify.decide(self.rules, obs)
-  if unsure then
-    self:askWhich(now, obs)
-  end
-  if not class then
-    class, source = self:recall(now, obs, key, remote)
-  end
-  return { class = class, source = source, app = app }
+  return obs, key, remote
 end
 
 --- What an answer about the window in front would be filed under, and the
