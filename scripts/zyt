@@ -738,9 +738,15 @@ def cmd_board(args) -> int:
     out.write_text(page)
     print(out)
     if not args.no_open:
+        # `open` reports a browser it could not start as an exit status and not
+        # as an exception, so the status is read too. Either way the board is
+        # already written and its path is already printed, so the failure is
+        # worth one line on stderr and nothing more.
         try:
-            subprocess.run(["open", str(out)], timeout=10, check=False)
+            failed = subprocess.run(["open", str(out)], timeout=10, check=False).returncode != 0
         except (OSError, subprocess.TimeoutExpired):
+            failed = True
+        if failed:
             print("could not open it; the line above is where it is", file=sys.stderr)
     return 0
 
