@@ -94,12 +94,13 @@ you are in and puts the repositories on the buttons: nothing on screen can say,
 because the editor does not expose its panels. The same list is in the menu
 ([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
 
-A terminal is the exception, because it knows. It gives every shell it opens an
-id for the pane it opened it in, the hook writes that id into the note, and it
+iTerm2 is the exception, because it knows. It gives every shell it opens an id
+for the pane it opened it in, the hook writes that id into the note, and it
 answers which pane is in front when it is asked. Four chats in four tabs are then
 told apart by the terminal itself: switching tabs between an employer repository
-and a private one changes the class and asks nothing
-([ADR 0012](docs/adr/0012-the-pane-in-front-is-the-chat.md)).
+and a private one changes the class and asks nothing. Another terminal notes its
+pane too and nothing asks it yet, so its chats are told apart by what they work
+on, the same as an editor's ([ADR 0012](docs/adr/0012-the-pane-in-front-is-the-chat.md)).
 
 ```json
 "hooks": {
