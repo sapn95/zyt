@@ -51,7 +51,12 @@ one, and the menu stops showing it as if it were.
 A terminal that keeps its panes to itself, or a session started somewhere that
 has no panes at all, writes no `pane` and loses nothing: the order from
 [ADR 0003](0003-a-terminal-belongs-to-its-remote.md) is still there underneath.
-`zyt doctor` says which of the two the terminal it is run in is.
+
+Writing the id down and asking for it are two separate halves, and only iTerm2
+has both today. Terminal names its sessions as well, so a note from there carries
+a `pane` that nothing looks up yet; the day an adapter for it is added, the notes
+already written are right. `zyt doctor` says which of the three cases the terminal
+it is run in is: matched, noted but not asked, or nameless.
 
 ## What was rejected
 

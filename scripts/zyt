@@ -1012,12 +1012,15 @@ def cmd_doctor(_args) -> int:
     link = SPOONS / "Zyt.spoon"
     say(link.exists(), f"{link} exists" if link.exists() else f"{link} is missing (zyt link)")
     pane = terminal_pane()
-    say(
-        True if pane else None,
-        f"this terminal names its panes ({pane}): a chat started here is matched to the pane in front"
-        if pane
-        else "this terminal does not name its panes; chats started here are told apart by what they work on",
-    )
+    # Writing the pane down and matching it are two things. Terminal names its
+    # panes as well, but the Spoon can only ask iTerm2 which of its panes is in
+    # front, so anywhere else the id sits in the note without being used.
+    if pane and os.environ.get("TERM_PROGRAM") == "iTerm.app":
+        say(True, f"this terminal names its panes ({pane}): a chat started here is matched to the pane in front")
+    elif pane:
+        say(None, f"the pane is noted ({pane}), but the Spoon cannot ask this terminal which pane is in front")
+    else:
+        say(None, "this terminal does not name its panes; chats started here are told apart by what they work on")
     try:
         rules = load_rules()
         say(True, f"rules file read: {CONFIG}" if CONFIG.exists() else f"no rules file at {CONFIG}, defaults apply")
