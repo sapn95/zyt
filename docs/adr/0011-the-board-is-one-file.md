@@ -1,6 +1,6 @@
 # 0011 — The board is one file, with no script in it and nothing to fetch
 
-**Status:** accepted, 2026-09-21.
+**Status:** accepted, 2026-09-21; extended 2026-09-23 with the weeks either side.
 
 ## The problem
 
@@ -27,6 +27,16 @@ into a tooltip for free. Dark mode is one `prefers-color-scheme` query. The two
 classes keep the blue and the purple of the menu-bar panel, so the board and the
 Spoon say the same colour about the same thing.
 
+Going back a week is a link into the same file. Every week from the first one
+with hours in it to the last is written out, one `<section>` each, and the
+address says which is on show: the week whose id it ends in through `:target`,
+and the week that was asked for while it ends in nothing. Paging has to stay
+inside the file, because a page that fetched the next week would need something
+to fetch it from. Where `:has()` is not understood the weeks stand one under the
+other and the links still jump to the right one. A quiet week costs about nine
+kilobytes of the file and a full one about twenty, so a year of it is roughly a
+megabyte, which a browser opens without thinking about it.
+
 A run of segments of one class with no real gap between them is drawn as one
 bar. `intervals.csv` can hold a dozen of them seconds long each, from a minute
 where the class flickered because the window did. The totals are the same either
@@ -47,6 +57,11 @@ how to open a file.
 
 An image. A PNG cannot be hovered for the exact times, cannot be searched for a
 date, and would need a renderer installed to make it at all.
+
+A file per week, linked to its neighbours. The arrow forward would have to point
+at a week nobody has written yet, so it would either go nowhere or make the
+command write out a run of files, and the directory would fill up with weeks
+again.
 
 Leaving the board in a temporary directory. The default is
 `~/.local/state/zyt/board.html`, one file that is overwritten, so a reload in
