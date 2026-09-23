@@ -290,7 +290,10 @@ class Board(unittest.TestCase):
         blocks, booked, leftover = zyt.propose(days, REPORT)
         segments = {day: [] for day in days}
         segments[dt.date(2026, 9, 14)] = [seg("2026-09-14", "09:00", "17:00")]
-        page = zyt.render_board(days, segments, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.")
+        drawn = zyt.board_week(
+            days, segments, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w2026-W38"
+        )
+        page = zyt.render_board([drawn], "Week 2026-W38")
         self.assertTrue(page.startswith("<!doctype html>"))
         self.assertIn('title="work 09:00 to 17:00, 8h00"', page)  # the recorded lane
         self.assertIn('title="book 09:00 to 14:00, 5h00"', page)  # and the proposal below it
@@ -326,6 +329,49 @@ class Board(unittest.TestCase):
                 self.assertIn("Monday 14.09.2026", drawn)
                 self.assertNotIn("left over", drawn)
                 self.assertNotIn("Tue", drawn)
+            finally:
+                zyt.sys.stdout = out
+                zyt.STATE, zyt.CONFIG = state, config
+
+    def test_the_weeks_run_from_the_first_recorded_to_the_last(self):
+        recorded = [seg("2026-09-14", "09:00", "17:00"), seg("2026-09-28", "09:00", "17:00")]
+        weeks = [zyt.week_of(day) for day in zyt.board_weeks(recorded, dt.date(2026, 9, 21))]
+        self.assertEqual(weeks, ["2026-W38", "2026-W39", "2026-W40"])  # W39 is empty and still in the row
+        asked = [zyt.week_of(day) for day in zyt.board_weeks(recorded, dt.date(2026, 10, 12))]
+        self.assertEqual(asked, ["2026-W38", "2026-W39", "2026-W40", "2026-W41", "2026-W42"])
+        self.assertEqual([zyt.week_of(d) for d in zyt.board_weeks([], dt.date(2026, 9, 21))], ["2026-W39"])
+        over = [seg("2026-09-20", "23:30", "00:30")]  # the half hour after midnight is the next week
+        self.assertEqual(
+            [zyt.week_of(d) for d in zyt.board_weeks(over, dt.date(2026, 9, 14))], ["2026-W38", "2026-W39"]
+        )
+
+    def test_the_arrows_move_between_the_weeks_in_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config, out = zyt.STATE, zyt.CONFIG, zyt.sys.stdout
+            zyt.STATE = Path(tmp) / "state"
+            zyt.CONFIG = Path(tmp) / "rules.json"
+            zyt.STATE.mkdir()
+            (zyt.STATE / "intervals.csv").write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T08:00:00+02:00,2026-09-14T12:00:00+02:00,14400,work,app,Mail\n"
+                "2026-09-21T08:00:00+02:00,2026-09-21T12:00:00+02:00,14400,work,app,Mail\n"
+            )
+            page = Path(tmp) / "board.html"
+            try:
+                zyt.sys.stdout = io.StringIO()
+                self.assertEqual(zyt.main(["board", "2026-W39", "--out", str(page), "--no-open"]), 0)
+                drawn = page.read_text()
+                self.assertIn('<section class="week" id="w2026-W38">', drawn)
+                self.assertIn('<section class="week current" id="w2026-W39">', drawn)
+                self.assertIn('href="#w2026-W38"', drawn)  # back out of the week on show
+                self.assertEqual(drawn.count("nothing earlier"), 1)  # and no link off either end
+                self.assertEqual(drawn.count("nothing later"), 1)
+                self.assertNotIn("<script", drawn)
+                # one day is asked for by name, so it is alone in the file and has no arrows
+                self.assertEqual(zyt.main(["board", "2026-09-21", "--out", str(page), "--no-open"]), 0)
+                alone = page.read_text()
+                self.assertEqual(alone.count('<section class="week'), 1)
+                self.assertNotIn("<nav>", alone)
             finally:
                 zyt.sys.stdout = out
                 zyt.STATE, zyt.CONFIG = state, config
