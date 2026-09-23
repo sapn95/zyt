@@ -521,12 +521,21 @@ def bars(spans: list, first: int, total: int) -> str:
     return "".join(out)
 
 
-def board_weeks(segments: list, monday: dt.date) -> list:
+def by_week(segments: list) -> dict:
+    """The rows cut at midnight and filed under the Monday of the week they fall
+    in. A file of many weeks then walks the rows once instead of once a week."""
+    out = {}
+    for part in split_by_day(segments):
+        day = part.start.date()
+        out.setdefault(day - dt.timedelta(days=day.weekday()), []).append(part)
+    return out
+
+
+def board_weeks(grouped: dict, monday: dt.date) -> list:
     """The Mondays the file holds: from the first week with something recorded in
     it to the last, and the week asked for even when it lies outside them. A week
     nobody worked stays in the row, so the arrows run on without a gap."""
-    mondays = {day - dt.timedelta(days=day.weekday()) for day in (part.start.date() for part in split_by_day(segments))}
-    mondays.add(monday)
+    mondays = set(grouped) | {monday}
     out, week = [], min(mondays)
     while week <= max(mondays):
         out.append(week)
@@ -778,7 +787,7 @@ def cmd_report(args) -> int:
 
 
 def drawn_week(recorded: list, monday: dt.date, report: dict, nav="", current=False) -> str:
-    """One week worked out and drawn, from the rows as they were read."""
+    """One week worked out and drawn, from the rows of that week."""
     segments = week_segments(recorded, monday)
     days = {day: summarise(items) for day, items in segments.items()}
     blocks, booked, leftover = propose(days, report)
@@ -820,24 +829,29 @@ def drawn_day(recorded: list, monday: dt.date, day: dt.date, report: dict) -> st
 def cmd_board(args) -> int:
     """The week the report prints, drawn instead of tabulated, and opened. Every
     week with hours in it is written into the same file, so the arrows above a
-    week go back and forward without another command."""
+    week go back and forward without another command. `--one-week` leaves the
+    others out, for a file that is going to somebody else."""
     rules = load_rules()
     single = bool(args.when) and "-W" not in args.when.upper()
     monday, day = period(args.when, single)
-    recorded = read_intervals(STATE / "intervals.csv")
+    grouped = by_week(read_intervals(STATE / "intervals.csv"))
+    this_week = grouped.get(monday, [])
     if day:
         title = f"{day:%A %d.%m.%Y}"
-        weeks = [drawn_day(recorded, monday, day, rules["report"])]
+        weeks = [drawn_day(this_week, monday, day, rules["report"])]
+    elif args.one_week:
+        title = f"Week {week_of(monday)}"
+        weeks = [drawn_week(this_week, monday, rules["report"], current=True)]
     else:
         title = f"Week {week_of(monday)}"
-        mondays = board_weeks(recorded, monday)
+        mondays = board_weeks(grouped, monday)
         weeks = []
         for i, each in enumerate(mondays):
             older = week_of(mondays[i - 1]) if i else None
             newer = week_of(mondays[i + 1]) if i + 1 < len(mondays) else None
             # A file with one week in it has nowhere to go, so it gets no arrows.
             nav = board_nav(older, newer) if len(mondays) > 1 else ""
-            weeks.append(drawn_week(recorded, each, rules["report"], nav, each == monday))
+            weeks.append(drawn_week(grouped.get(each, []), each, rules["report"], nav, each == monday))
     page = render_board(weeks, title)
     out = Path(args.out).expanduser() if args.out else STATE / "board.html"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1161,6 +1175,7 @@ def main(argv=None) -> int:
     board.add_argument("when", nargs="?", metavar="YYYY-Www|YYYY-MM-DD")
     board.add_argument("--out", metavar="FILE", help=f"where to write it, default {STATE / 'board.html'}")
     board.add_argument("--no-open", action="store_true", help="write it and leave it closed")
+    board.add_argument("--one-week", action="store_true", help="that week alone, with no way back to the others")
     board.set_defaults(run=cmd_board)
     hook = sub.add_parser("hook", help="stdin hook for a coding tool (Claude Code)")
     hook.add_argument("tool", choices=["claude-code"])

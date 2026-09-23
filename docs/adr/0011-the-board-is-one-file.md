@@ -28,14 +28,19 @@ classes keep the blue and the purple of the menu-bar panel, so the board and the
 Spoon say the same colour about the same thing.
 
 Going back a week is a link into the same file. Every week from the first one
-with hours in it to the last is written out, one `<section>` each, and the
-address says which is on show: the week whose id it ends in through `:target`,
-and the week that was asked for while it ends in nothing. Paging has to stay
-inside the file, because a page that fetched the next week would need something
-to fetch it from. Where `:has()` is not understood the weeks stand one under the
-other and the links still jump to the right one. A quiet week costs about nine
-kilobytes of the file and a full one about twenty, so a year of it is roughly a
-megabyte, which a browser opens without thinking about it.
+with hours in it to the last is written out, together with the week that was
+asked for when it lies outside them, one `<section>` each, and the address says
+which is on show: the week whose id it ends in through `:target`, and the week
+that was asked for while it ends in nothing. Paging has to stay inside the file,
+because a page that fetched the next week would need something to fetch it from.
+Where `:has()` is not understood the weeks stand one under the other and the
+links still jump to the right one. A quiet week costs about nine kilobytes of the
+file and a full one about twenty, so a year of it is roughly a megabyte, which a
+browser opens without thinking about it.
+
+`--one-week` writes the week on its own. The board is as private as
+`intervals.csv` it is drawn from, and a file that holds every week recorded is a
+lot to hand over when the question was about one of them.
 
 A run of segments of one class with no real gap between them is drawn as one
 bar. `intervals.csv` can hold a dozen of them seconds long each, from a minute

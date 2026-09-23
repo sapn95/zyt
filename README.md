@@ -144,7 +144,7 @@ no room is printed as the leftover rather than dropped
 zyt board                                      # this week, written and opened
 zyt board 2026-W38                             # another week
 zyt board 2026-09-14                           # one day on its own
-zyt board --out ~/Desktop/week.html --no-open
+zyt board --one-week --out ~/Desktop/week.html --no-open
 ```
 
 The same week, drawn instead of tabulated. Each day gets two lanes on one hour
@@ -159,10 +159,12 @@ Mon 14.09.       ████████████████████▓
                  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒       08:00–13:00 · 13:30–16:20
 ```
 
-The links above the heading go back and forward a week. Every week from the
-first one with hours in it to the last is in the same file, one page each, so
-following a link fetches nothing and the ends of the run say so instead of
-offering a link. A day asked for by date is alone in the file and has no links.
+The links above the heading go back and forward a week. The file holds every
+week from the first one with hours in it to the last, and the week asked for
+when that is a later one still, one page each, so following a link fetches
+nothing and the ends of the run say so instead of offering a link. A day asked
+for by date is alone in the file and has no links, and `--one-week` does the same
+for a week, which is what to write out when the file is going to somebody else.
 
 One file with a `<style>` in it and nothing else: no script, no font, no
 stylesheet, nothing fetched when it opens, and dark mode follows the system

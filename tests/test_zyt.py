@@ -334,16 +334,17 @@ class Board(unittest.TestCase):
                 zyt.STATE, zyt.CONFIG = state, config
 
     def test_the_weeks_run_from_the_first_recorded_to_the_last(self):
-        recorded = [seg("2026-09-14", "09:00", "17:00"), seg("2026-09-28", "09:00", "17:00")]
-        weeks = [zyt.week_of(day) for day in zyt.board_weeks(recorded, dt.date(2026, 9, 21))]
+        grouped = zyt.by_week([seg("2026-09-14", "09:00", "17:00"), seg("2026-09-28", "09:00", "17:00")])
+        weeks = [zyt.week_of(day) for day in zyt.board_weeks(grouped, dt.date(2026, 9, 21))]
         self.assertEqual(weeks, ["2026-W38", "2026-W39", "2026-W40"])  # W39 is empty and still in the row
-        asked = [zyt.week_of(day) for day in zyt.board_weeks(recorded, dt.date(2026, 10, 12))]
+        asked = [zyt.week_of(day) for day in zyt.board_weeks(grouped, dt.date(2026, 10, 12))]
         self.assertEqual(asked, ["2026-W38", "2026-W39", "2026-W40", "2026-W41", "2026-W42"])
-        self.assertEqual([zyt.week_of(d) for d in zyt.board_weeks([], dt.date(2026, 9, 21))], ["2026-W39"])
-        over = [seg("2026-09-20", "23:30", "00:30")]  # the half hour after midnight is the next week
+        self.assertEqual([zyt.week_of(d) for d in zyt.board_weeks({}, dt.date(2026, 9, 21))], ["2026-W39"])
+        over = zyt.by_week([seg("2026-09-20", "23:30", "00:30")])  # the half hour after midnight is a week on
         self.assertEqual(
             [zyt.week_of(d) for d in zyt.board_weeks(over, dt.date(2026, 9, 14))], ["2026-W38", "2026-W39"]
         )
+        self.assertEqual(sorted(len(rows) for rows in over.values()), [1, 1])  # and it is filed in that week
 
     def test_the_arrows_move_between_the_weeks_in_the_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -372,6 +373,12 @@ class Board(unittest.TestCase):
                 alone = page.read_text()
                 self.assertEqual(alone.count('<section class="week'), 1)
                 self.assertNotIn("<nav>", alone)
+                # and a week on its own when the file is going to somebody else
+                self.assertEqual(zyt.main(["board", "2026-W39", "--one-week", "--out", str(page), "--no-open"]), 0)
+                only = page.read_text()
+                self.assertIn('<section class="week current" id="w2026-W39">', only)
+                self.assertNotIn("w2026-W38", only)
+                self.assertNotIn("<nav>", only)
             finally:
                 zyt.sys.stdout = out
                 zyt.STATE, zyt.CONFIG = state, config
