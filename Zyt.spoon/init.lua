@@ -753,6 +753,21 @@ function obj:copyReport()
   end
 end
 
+--- The week drawn as one HTML file and opened, the same as `zyt board`
+--- ([ADR 0011](../../docs/adr/0011-the-board-is-one-file.md)). One line comes
+--- back when it worked, the path it wrote, and there is nothing to say about a
+--- page that is already on screen. Anything more than that line means the
+--- browser would not take it, and then the path is the useful part.
+function obj:showBoard()
+  local out, ok = hs.execute(("%q board 2>&1"):format(self.cli), true)
+  out = (out or ""):gsub("%s+$", "")
+  if not ok then
+    self:complain("the board failed: " .. out)
+  elseif out:find("\n") then
+    hs.alert.show("zyt: " .. out, 4)
+  end
+end
+
 function obj:openRules()
   ensureDirectory(self.configPath:match("^(.*)/[^/]+$"))
   if not hs.fs.attributes(self.configPath, "mode") then
@@ -843,6 +858,12 @@ function obj:menu()
       title = "Copy this week's report",
       fn = function()
         self:copyReport()
+      end,
+    },
+    {
+      title = "Show this week's board",
+      fn = function()
+        self:showBoard()
       end,
     },
     { title = "-" },
