@@ -393,6 +393,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 main { max-width: 1060px; margin: 0 auto; }
+/* Every week is in the file and one of them is on show: the week the address
+   ends in, or the week that was asked for while it ends in nothing. Where
+   :has() is not understood the weeks stand one under the other and the links
+   still jump. */
+.week { display: none; }
+.week:target { display: block; }
+body:not(:has(.week:target)) .week.current { display: block; }
+@supports not selector(:has(*)) {
+  .week { display: block; }
+  .week + .week { margin-top: 3.5rem; }
+}
+nav { display: flex; gap: 1rem; margin: 0 0 0.9rem; font-size: 0.78rem; }
+nav a { color: var(--work); text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+nav .edge { color: var(--dim); }
+nav .newer { margin-left: auto; }
 h1 { margin: 0; font-size: 1.5rem; font-weight: 640; letter-spacing: -0.015em; }
 .sub { margin: 0.15rem 0 0; color: var(--dim); }
 .totals { display: flex; flex-wrap: wrap; gap: 2rem; margin: 1.6rem 0 0; padding: 0; list-style: none; }
@@ -505,8 +521,39 @@ def bars(spans: list, first: int, total: int) -> str:
     return "".join(out)
 
 
-def render_board(days, segments, blocks, booked, leftover, report, heading, sub) -> str:
-    """The week as one page: per day the hours recorded on the upper lane and the
+def board_weeks(segments: list, monday: dt.date) -> list:
+    """The Mondays the file holds: from the first week with something recorded in
+    it to the last, and the week asked for even when it lies outside them. A week
+    nobody worked stays in the row, so the arrows run on without a gap."""
+    mondays = {day - dt.timedelta(days=day.weekday()) for day in (part.start.date() for part in split_by_day(segments))}
+    mondays.add(monday)
+    out, week = [], min(mondays)
+    while week <= max(mondays):
+        out.append(week)
+        week += dt.timedelta(days=7)
+    return out
+
+
+def board_nav(older, newer) -> str:
+    """The way back and forward, as two links into the same file. Following one
+    fetches nothing, and at either end the week that is not there is said in dim
+    words rather than left as a link that would go nowhere."""
+
+    def side(week, side_class, text):
+        if week is None:
+            return f'<span class="edge {side_class}">{html.escape(text)}</span>'
+        return f'<a class="{side_class}" href="#w{week}">{html.escape(text)}</a>'
+
+    return (
+        "<nav>"
+        + side(older, "older", f"‹ {older}" if older else "‹ nothing earlier")
+        + side(newer, "newer", f"{newer} ›" if newer else "nothing later ›")
+        + "</nav>"
+    )
+
+
+def board_week(days, segments, blocks, booked, leftover, report, heading, sub, ident, nav="", current=False) -> str:
+    """One week drawn: per day the hours recorded on the upper lane and the
     proposal on the lower one, both on the same hour scale, so that what would be
     booked can be held against what happened."""
     first, last = scale(segments, blocks, report)
@@ -546,6 +593,23 @@ def render_board(days, segments, blocks, booked, leftover, report, heading, sub)
     totals = [(fmt_m(work), "recorded work"), (fmt_m(private), "private"), (fmt_m(filled), "booked")]
     if leftover is not None:
         totals.append((fmt_m(leftover), "left over"))
+    return (
+        f'<section class="week{" current" if current else ""}" id="{ident}">{nav}'
+        f"<h1>{html.escape(heading)}</h1>"
+        f'<p class="sub">{html.escape(sub)}</p>'
+        '<ul class="totals">'
+        + "".join(f"<li><b>{amount}</b>{html.escape(what)}</li>" for amount, what in totals)
+        + "</ul>"
+        + f'<section class="chart" style="--hour:{100 / (last - first):.4f}%">'
+        + "".join(rows)
+        + "</section></section>"
+    )
+
+
+def render_board(weeks: list, title: str) -> str:
+    """The weeks as one file, the one asked for on show and the rest a link away.
+    They are all written out because a page that could fetch the next week would
+    need something to fetch it from, and this is a file (ADR 0011)."""
     keys = [("work", "recorded work"), ("private", "private"), ("book", "proposed booking")]
     source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)
     made = f"written {dt.datetime.now():%d.%m.%Y %H:%M} from {source} · one file, no script, nothing fetched"
@@ -556,17 +620,12 @@ def render_board(days, segments, blocks, booked, leftover, report, heading, sub)
             "<head>",
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
-            f"<title>zyt · {html.escape(heading)}</title>",
+            f"<title>zyt · {html.escape(title)}</title>",
             f"<style>{BOARD_STYLE}</style>",
             "</head>",
             "<body>",
             "<main>",
-            f"<h1>{html.escape(heading)}</h1>",
-            f'<p class="sub">{html.escape(sub)}</p>',
-            '<ul class="totals">'
-            + "".join(f"<li><b>{amount}</b>{html.escape(what)}</li>" for amount, what in totals)
-            + "</ul>",
-            f'<section class="chart" style="--hour:{100 / (last - first):.4f}%">' + "".join(rows) + "</section>",
+            *weeks,
             "<footer>"
             + "".join(f'<span class="key"><i class="{kind}"></i>{html.escape(what)}</span>' for kind, what in keys)
             + f'<span class="made">{html.escape(made)}</span></footer>',
@@ -718,21 +777,68 @@ def cmd_report(args) -> int:
     return 0
 
 
+def drawn_week(recorded: list, monday: dt.date, report: dict, nav="", current=False) -> str:
+    """One week worked out and drawn, from the rows as they were read."""
+    segments = week_segments(recorded, monday)
+    days = {day: summarise(items) for day, items in segments.items()}
+    blocks, booked, leftover = propose(days, report)
+    return board_week(
+        days,
+        segments,
+        blocks,
+        booked,
+        leftover,
+        report,
+        f"Week {week_of(monday)}",
+        f"{monday:%A %d.%m.} to {monday + dt.timedelta(days=6):%A %d.%m.%Y}",
+        f"w{week_of(monday)}",
+        nav,
+        current,
+    )
+
+
+def drawn_day(recorded: list, monday: dt.date, day: dt.date, report: dict) -> str:
+    """The one day asked for, out of the week it was booked in: no arrows, because
+    a day is something you ask for by name rather than page through."""
+    segments = week_segments(recorded, monday)
+    days = {each: summarise(items) for each, items in segments.items()}
+    blocks, booked, _ = propose(days, report)
+    return board_week(
+        {day: days[day]},
+        {day: segments[day]},
+        blocks,
+        booked,
+        None,
+        report,
+        f"{day:%A %d.%m.%Y}",
+        f"week {week_of(day)}",
+        f"w{week_of(day)}",
+        current=True,
+    )
+
+
 def cmd_board(args) -> int:
-    """The week the report prints, drawn instead of tabulated, and opened."""
+    """The week the report prints, drawn instead of tabulated, and opened. Every
+    week with hours in it is written into the same file, so the arrows above a
+    week go back and forward without another command."""
     rules = load_rules()
     single = bool(args.when) and "-W" not in args.when.upper()
     monday, day = period(args.when, single)
-    segments = week_segments(read_intervals(STATE / "intervals.csv"), monday)
-    days = {each: summarise(items) for each, items in segments.items()}
-    blocks, booked, leftover = propose(days, rules["report"])
+    recorded = read_intervals(STATE / "intervals.csv")
     if day:
-        segments, days, leftover = {day: segments[day]}, {day: days[day]}, None
-        heading, sub = f"{day:%A %d.%m.%Y}", f"week {week_of(day)}"
+        title = f"{day:%A %d.%m.%Y}"
+        weeks = [drawn_day(recorded, monday, day, rules["report"])]
     else:
-        heading = f"Week {week_of(monday)}"
-        sub = f"{monday:%A %d.%m.} to {monday + dt.timedelta(days=6):%A %d.%m.%Y}"
-    page = render_board(days, segments, blocks, booked, leftover, rules["report"], heading, sub)
+        title = f"Week {week_of(monday)}"
+        mondays = board_weeks(recorded, monday)
+        weeks = []
+        for i, each in enumerate(mondays):
+            older = week_of(mondays[i - 1]) if i else None
+            newer = week_of(mondays[i + 1]) if i + 1 < len(mondays) else None
+            # A file with one week in it has nowhere to go, so it gets no arrows.
+            nav = board_nav(older, newer) if len(mondays) > 1 else ""
+            weeks.append(drawn_week(recorded, each, rules["report"], nav, each == monday))
+    page = render_board(weeks, title)
     out = Path(args.out).expanduser() if args.out else STATE / "board.html"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page)

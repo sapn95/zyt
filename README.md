@@ -159,6 +159,11 @@ Mon 14.09.       ████████████████████▓
                  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒       08:00–13:00 · 13:30–16:20
 ```
 
+The links above the heading go back and forward a week. Every week from the
+first one with hours in it to the last is in the same file, one page each, so
+following a link fetches nothing and the ends of the run say so instead of
+offering a link. A day asked for by date is alone in the file and has no links.
+
 One file with a `<style>` in it and nothing else: no script, no font, no
 stylesheet, nothing fetched when it opens, and dark mode follows the system
 ([ADR 0011](docs/adr/0011-the-board-is-one-file.md)). It goes to
