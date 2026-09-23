@@ -22,6 +22,7 @@ W                          ← the menu-bar item: work is running
 ├─ ────────────
 ├─ Today  6h12 work · 0h48 private
 ├─ Copy this week's report
+├─ Show this week's board   → the HTML page, in the browser
 ├─ ────────────
 ├─ Open the rules file
 ├─ Reload the rules
@@ -165,6 +166,9 @@ stylesheet, nothing fetched when it opens, and dark mode follows the system
 is overwritten every time, so a reload in the browser shows the latest. The
 browser it opens in is classified by your own rules like any other window: a
 board opened in one you have marked as work records work time.
+
+**Show this week's board** in the menu runs the same command, so the page is one
+click away without a terminal.
 
 ## Install
 
