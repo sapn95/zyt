@@ -1,7 +1,7 @@
 # 0010 — Which chat, out of the several open in one editor
 
-**Status:** accepted, 2026-09-20; amended 2026-09-24, the chats are a list and
-every one of them is in it.
+**Status:** accepted, 2026-09-20; amended 2026-09-24, the chats are a list with a
+row for every repository they are in, up to eight.
 
 ## The problem
 
