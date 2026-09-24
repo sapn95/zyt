@@ -64,8 +64,11 @@ One row per repository, the newest chat of it, and every repository that has a
 class gets a row up to eight of them: a panel that showed three and kept the
 fourth to itself was asking about a chat the person could not pick. Two chats in
 one checkout are one row, because two rows with the same name and the same class
-would be a choice made blind. The last row is Later, which answers nothing and
-takes the panel away, and it is there because nothing else does any more.
+would be a choice made blind. Past eight the newest chat of each class keeps its
+place whatever its age, since the question is only asked because the chats
+straddle both classes and a list with one class in it has no answer in it. The
+last row is Later, which answers nothing and takes the panel away, and it is
+there because nothing else does any more.
 
 The answer holds for that application until they type into another chat, which
 says where they are more plainly than a click. It is kept in memory and not
