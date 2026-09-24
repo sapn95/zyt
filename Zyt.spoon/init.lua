@@ -563,12 +563,18 @@ function obj:ask(headline, what, choices, answered, about)
   if #choices == 0 then
     return false
   end
+  -- What is being asked: the key and the choices offered for it.
+  local asking = { tostring(about) }
+  for _, choice in ipairs(choices) do
+    asking[#asking + 1] = tostring(choice.id)
+  end
+  local question = table.concat(asking, "\n")
   if self.prompt then
-    -- A newer question about another window takes the place. Nothing clears a
-    -- panel on a timer any more, so a question standing unanswered about a
-    -- window nobody is at would otherwise be the last one ever asked. The same
-    -- question again leaves the panel where it is.
-    if self.prompt.about == about then
+    -- The same question again leaves the panel where it is. Anything else takes
+    -- the place: nothing clears a panel on a timer any more, so a question left
+    -- standing about a window nobody is at would otherwise be the last one ever
+    -- asked, and a chat opened since belongs in the list it is offering.
+    if self.prompt.question == question then
       return false
     end
     self:dismiss()
@@ -632,7 +638,7 @@ function obj:ask(headline, what, choices, answered, about)
   canvas:clickActivating(false)
   canvas:level(hs.canvas.windowLevels.floating)
   canvas:show()
-  self.prompt = { canvas = canvas, about = about }
+  self.prompt = { canvas = canvas, question = question }
   -- A question that takes itself off the screen is one the person watched
   -- vanish half read, and then the class is decided by nobody. It waits.
   -- `prompt.seconds` above zero puts the old behaviour back.
