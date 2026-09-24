@@ -482,15 +482,22 @@ function obj:askWhich(now, obs)
   -- Keyed the way the named chat itself is, by the application hosting it, so
   -- that forgetting one answer clears both.
   local key = chatKey(obs.bundle)
-  if not self.rules.prompt.enabled or not idleIsShort(obs.idle) then
+  if not self.rules.prompt.enabled then
     return
   end
-  -- A panel standing for this question is kept current. The cooldown is there to
-  -- stop the question being asked again, not to freeze the list while it waits:
-  -- a chat that has closed since would stay in it, offering a session that ended.
+  -- A panel standing for this question is kept current, and neither gate below
+  -- holds it back. Somebody at the keyboard and a cooldown are what it takes to
+  -- ask; keeping a list honest while it waits takes nothing, and a chat that
+  -- closed while the person was away would otherwise still be in it, offering a
+  -- session that ended.
   local standing = self.prompt ~= nil and self.prompt.about == key
-  if not standing and not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
-    return
+  if not standing then
+    if not idleIsShort(obs.idle) then
+      return
+    end
+    if not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
+      return
+    end
   end
   local choices = {}
   for _, chat in ipairs(classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)) do
