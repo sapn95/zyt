@@ -267,6 +267,44 @@ describe("classify.decide", function()
   end)
 end)
 
+describe("classify.chatChoices", function()
+  local infra = "ssh://git@git.example.com:7999/team/infra.git"
+  local budget = "git@github.com:me/budget.git"
+
+  local function chat(session, remote)
+    return { age = 60, promptAt = 100, session = session, remote = remote, bundle = "b" }
+  end
+
+  it("offers each repository once, in the order they were typed into", function()
+    local chats = { chat("a", infra), chat("b", infra), chat("c", budget) }
+    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 8)
+    assert.equal(2, #rows)
+    assert.same({ "a", "c" }, { rows[1].session, rows[2].session })
+    assert.same({ "work", "private" }, { rows[1].class, rows[2].class })
+  end)
+
+  it("leaves out a repository the rules have no class for", function()
+    local chats = { chat("a", infra), chat("x", "git@example.org:me/elsewhere.git") }
+    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 8)
+    assert.equal(1, #rows)
+    assert.equal("a", rows[1].session)
+    assert.same({}, classify.chatChoices(R, { bundle = "b", chats = {} }, 8))
+  end)
+
+  it("keeps a chat of each class when there is no room for them all", function()
+    local chats = {}
+    for index = 1, 5 do
+      chats[index] = chat("w" .. index, (infra:gsub("infra", "infra" .. index)))
+    end
+    chats[#chats + 1] = chat("p", budget)
+    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 3)
+    -- the newest of each class, and then whatever room is left, newest first:
+    -- a list of five work repositories would be a question with no answer in it
+    assert.equal(3, #rows)
+    assert.same({ "w1", "p", "w2" }, { rows[1].session, rows[2].session, rows[3].session })
+  end)
+end)
+
 describe("classify.repositoryOf", function()
   it("names the repository even when no rule knows its class", function()
     local unknown = function(path)

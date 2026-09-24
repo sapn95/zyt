@@ -33,7 +33,10 @@ wants one. An unanswered question is not repeated for `prompt.cooldownSeconds`,
 and the class stays what it was until there is an answer. It is only shown while
 the person is at the keyboard (idle under two minutes) and the screen is
 unlocked; a lock takes it down, which is also what clears a panel left standing
-over lunch.
+over lunch. One panel is up at a time, and a newer question about another window
+takes the place: with nothing clearing a panel on a timer, a question standing
+unanswered about a window nobody is at would otherwise be the last one ever
+asked.
 
 The rules file keeps the answers that should be versioned and explained; the
 learned file holds the rest. Moving an answer from one to the other is a copy.

@@ -160,6 +160,43 @@ function M.chatOf(rules, obs)
   return pick.remote, unsure, candidates
 end
 
+--- The chats worth putting to the person when nothing on screen says which one
+--- is in front: the newest chat of each repository, newest first, `max` of them
+--- at the outside. Two chats in one checkout are one entry, because they carry
+--- the same name and the same class and either answer would do.
+---
+--- When there are more repositories than `max`, the newest chat of each class
+--- keeps its place whatever its age: the question only gets asked because the
+--- chats straddle both classes, and a list with one class in it has no answer in
+--- it. The rest of the room goes to the newest.
+function M.chatChoices(rules, obs, max)
+  local _, _, candidates = M.chatOf(rules, obs)
+  local rows, seen = {}, {}
+  for _, chat in ipairs(candidates or {}) do
+    if type(chat.session) == "string" and not seen[chat.remote] then
+      seen[chat.remote] = true
+      rows[#rows + 1] = { session = chat.session, remote = chat.remote, class = M.remoteClass(rules, chat.remote) }
+    end
+  end
+  if #rows <= max then
+    return rows
+  end
+  local kept, taken, classes = {}, {}, {}
+  for index, row in ipairs(rows) do
+    if not classes[row.class] then
+      classes[row.class] = true
+      taken[index] = true
+      kept[#kept + 1] = row
+    end
+  end
+  for index, row in ipairs(rows) do
+    if not taken[index] and #kept < max then
+      kept[#kept + 1] = row
+    end
+  end
+  return kept
+end
+
 --- The remote of the repository a `repo` application's window is about, and
 --- where it was found: the chat in the pane the terminal says is in front, its
 --- working directory, an absolute path in the title, a title word that names a
