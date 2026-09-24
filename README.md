@@ -60,8 +60,9 @@ the Spoon looks at the frontmost window and asks the rules, in this order:
    "window.title": "${dirty}${activeEditorShort}${separator}${rootName}${separator}${activeFolderLong}"
    ```
 
-5. **Otherwise it asks, once.** A small panel under the menu bar: Work,
-   Private, or Don't ask. The answer is kept for that repository or that
+5. **Otherwise it asks, once.** A small panel under the menu bar, one row per
+   answer: Work, Private, or Don't ask. It stays until you pick one, and a lock
+   takes it down. The answer is kept for that repository or that
    application and never asked again; until it is answered, and for a Finder
    window you told it not to ask about, what was already running keeps running
    ([ADR 0002](docs/adr/0002-unknown-is-sticky-not-a-third-class.md),
@@ -91,7 +92,7 @@ can leave the same note with `zyt context <name> <directory>`.
 Each session gets a note of its own, so several chats in one editor can be told
 apart. When they are all in repositories of the same class, that is the class,
 whichever panel you are reading. When they straddle both, zyt asks which chat
-you are in and puts the repositories on the buttons: nothing on screen can say,
+you are in and lists the repositories, one row each: nothing on screen can say,
 because the editor does not expose its panels. The same list is in the menu
 ([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
 

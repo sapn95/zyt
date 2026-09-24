@@ -17,8 +17,13 @@ M.defaults = {
   remotes = {},
   apps = {},
   titles = {},
-  prompt = { enabled = true, seconds = 20, cooldownSeconds = 1800 },
+  prompt = { enabled = true, seconds = 0, cooldownSeconds = 1800 },
 }
+
+-- Zero seconds is the panel waiting for an answer rather than going away by
+-- itself, so it is a setting and not a missing one. Every other number in the
+-- block is a length of time and has to be one.
+local PROMPT_ZERO_OK = { seconds = true }
 
 local function fail(format, ...)
   return nil, ("rules: " .. format):format(...)
@@ -80,8 +85,12 @@ function M.normalise(raw, home)
     if value == nil then
       value = default
     end
-    if type(value) ~= type(default) or (type(value) == "number" and value <= 0) then
+    if type(value) ~= type(default) then
       return fail("prompt.%s has to be a %s like %s", key, type(default), tostring(default))
+    end
+    local least = PROMPT_ZERO_OK[key] and 0 or 1
+    if type(value) == "number" and value < least then
+      return fail("prompt.%s has to be %d or more", key, least)
     end
     prompt[key] = value
   end
