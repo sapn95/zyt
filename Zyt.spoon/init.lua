@@ -490,7 +490,8 @@ function obj:askWhich(now, obs)
   end
   local choices = {}
   for _, chat in ipairs(classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)) do
-    choices[#choices + 1] = { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[chat.class] }
+    choices[#choices + 1] =
+      { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[chat.class], class = chat.class }
   end
   if #choices < 2 then
     return
@@ -555,8 +556,9 @@ end
 --- Zyt:ask(headline, what, choices, answered, about)
 --- Method
 --- A small panel under the menu bar, one row per choice, each
---- `{ id, label, colour }`. It stays until it is answered, and nothing changes
---- while it is up. `about` is the key the question is about; a question that
+--- `{ id, label, colour, class }`, `class` naming what the colour stands for
+--- where it can change under one id. It stays until it is answered, and nothing
+--- changes while it is up. `about` is the key the question is about; a question that
 --- loses the panel to another one has its cooldown dropped, so it can be asked
 --- again. Returns true when it showed: one panel is up at a time, and a question
 --- that lost the place was never asked.
@@ -564,10 +566,13 @@ function obj:ask(headline, what, choices, answered, about)
   if #choices == 0 then
     return false
   end
-  -- What is being asked: the key and the choices offered for it.
+  -- What is being asked: the key, and every row the way it will be drawn. The
+  -- id alone is not the row. A session that moved to another checkout keeps its
+  -- id and changes both name and colour, and the panel would go on offering the
+  -- repository it left.
   local asking = { tostring(about) }
   for _, choice in ipairs(choices) do
-    asking[#asking + 1] = tostring(choice.id)
+    asking[#asking + 1] = table.concat({ tostring(choice.id), tostring(choice.label), tostring(choice.class) }, "\t")
   end
   local question = table.concat(asking, "\n")
   if self.prompt then
