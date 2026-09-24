@@ -207,9 +207,9 @@ local COLOURS = {
   other = { red = 0.35, green = 0.35, blue = 0.38 },
 }
 
--- How many chats the panel offers at once. The list is as long as it needs to
--- be up to here, so that the chat the person is in is in it; beyond here the
--- panel would be taller than the screen it hangs from.
+-- How many chats the panel offers at once: longer than an editor is ever asked
+-- about, shorter than the screen the panel hangs from. `classify.chatChoices`
+-- keeps a chat of each class in the list when it has to cut one.
 local MAX_CHAT_CHOICES = 8
 
 -- The row that answers nothing. A session id is a UUID, so this cannot be one.
@@ -463,7 +463,7 @@ function obj:recall(now, obs, key, remote)
         { id = "inherit", label = "Don't ask", colour = COLOURS.other },
       }, function(id)
         self:answer(key, id)
-      end)
+      end, key)
       -- The cooldown counts from a question somebody saw. Another panel being
       -- up already is not an answer, and next tick is soon enough to try again.
       if shown then
@@ -488,17 +488,9 @@ function obj:askWhich(now, obs)
   if not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
     return
   end
-  local _, _, candidates = classify.chatOf(self.rules, obs)
-  local choices, seen = {}, {}
-  for _, chat in ipairs(candidates or {}) do
-    -- One row per repository, the newest chat of it first. Two chats in the
-    -- same checkout would be two rows with the same name and the same class,
-    -- and the person would be picking between them blind.
-    if type(chat.session) == "string" and not seen[chat.remote] and #choices < MAX_CHAT_CHOICES then
-      seen[chat.remote] = true
-      local class = classify.remoteClass(self.rules, chat.remote)
-      choices[#choices + 1] = { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[class] }
-    end
+  local choices = {}
+  for _, chat in ipairs(classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)) do
+    choices[#choices + 1] = { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[chat.class] }
   end
   if #choices < 2 then
     return
@@ -512,7 +504,7 @@ function obj:askWhich(now, obs)
     else
       self:choose(obs.bundle, id)
     end
-  end)
+  end, key)
   if shown then
     self.asked[key] = now
   end
@@ -560,15 +552,26 @@ function obj:forget(key, bundle)
   self:tick()
 end
 
---- Zyt:ask(headline, what, choices, answered)
+--- Zyt:ask(headline, what, choices, answered, about)
 --- Method
 --- A small panel under the menu bar, one row per choice, each
 --- `{ id, label, colour }`. It stays until it is answered, and nothing changes
---- while it is up. Returns true when it showed: one panel is up at a time, and a
---- question that lost the place was never asked.
-function obj:ask(headline, what, choices, answered)
-  if self.prompt or #choices == 0 then
+--- while it is up. `about` is the key the question is about. Returns true when it
+--- showed: one panel is up at a time, and a question that lost the place was
+--- never asked.
+function obj:ask(headline, what, choices, answered, about)
+  if #choices == 0 then
     return false
+  end
+  if self.prompt then
+    -- A newer question about another window takes the place. Nothing clears a
+    -- panel on a timer any more, so a question standing unanswered about a
+    -- window nobody is at would otherwise be the last one ever asked. The same
+    -- question again leaves the panel where it is.
+    if self.prompt.about == about then
+      return false
+    end
+    self:dismiss()
   end
   local screen = hs.screen.mainScreen():frame()
   -- A row each, the full width of the panel. Side by side the rows shared the
@@ -629,7 +632,7 @@ function obj:ask(headline, what, choices, answered)
   canvas:clickActivating(false)
   canvas:level(hs.canvas.windowLevels.floating)
   canvas:show()
-  self.prompt = { canvas = canvas }
+  self.prompt = { canvas = canvas, about = about }
   -- A question that takes itself off the screen is one the person watched
   -- vanish half read, and then the class is decided by nobody. It waits.
   -- `prompt.seconds` above zero puts the old behaviour back.
