@@ -207,12 +207,31 @@ local COLOURS = {
   other = { red = 0.35, green = 0.35, blue = 0.38 },
 }
 
+-- How many chats the panel offers at once. The list is as long as it needs to
+-- be up to here, so that the chat the person is in is in it; beyond here the
+-- panel would be taller than the screen it hangs from.
+local MAX_CHAT_CHOICES = 8
+
+-- The row that answers nothing. A session id is a UUID, so this cannot be one.
+local LATER = "zyt:later"
+
 --- The last part of a remote's path, which is what people call a repository.
 local function shortRepo(remote)
   if type(remote) ~= "string" then
     return "?"
   end
   return (remote:gsub("%.git$", "")):match("([^/:]+)$") or remote
+end
+
+--- The repository a remote names, with its owner when the remote gives one. In
+--- a list of chats the owner is often the whole answer: two checkouts of the
+--- same name under different owners are a reason to be asked at all.
+local function repoLabel(remote)
+  if type(remote) ~= "string" then
+    return "?"
+  end
+  local path = remote:gsub("%.git$", "")
+  return path:match("([^/:]+/[^/]+)$") or shortRepo(remote)
 end
 
 local function applescript(script)
@@ -438,18 +457,13 @@ function obj:recall(now, obs, key, remote)
   end
   if answer == nil and key and self.rules.prompt.enabled and idleIsShort(obs.idle) then
     if learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
-      local shown = self:ask(
-        "whose time is this?",
-        remote and remote:match("([^/:]+/[^/]+)%.git$") or remote or obs.app,
-        {
-          { id = "work", label = "Work", colour = COLOURS.work },
-          { id = "private", label = "Private", colour = COLOURS.private },
-          { id = "inherit", label = "Don't ask", colour = COLOURS.other },
-        },
-        function(id)
-          self:answer(key, id)
-        end
-      )
+      local shown = self:ask("whose time is this?", remote and repoLabel(remote) or obs.app, {
+        { id = "work", label = "Work", colour = COLOURS.work },
+        { id = "private", label = "Private", colour = COLOURS.private },
+        { id = "inherit", label = "Don't ask", colour = COLOURS.other },
+      }, function(id)
+        self:answer(key, id)
+      end)
       -- The cooldown counts from a question somebody saw. Another panel being
       -- up already is not an answer, and next tick is soon enough to try again.
       if shown then
@@ -462,8 +476,8 @@ end
 
 --- Two chats are open in this application, one work and one private, and
 --- nothing on screen says which panel is in front. Ask, with the repositories
---- as the buttons, at most once per cooldown and only while somebody is there
---- to answer. Until they do, the class is the chat they last typed into.
+--- as the list, at most once per cooldown and only while somebody is there to
+--- answer. Until they do, the class is the chat they last typed into.
 function obj:askWhich(now, obs)
   -- Keyed the way the named chat itself is, by the application hosting it, so
   -- that forgetting one answer clears both.
@@ -475,18 +489,29 @@ function obj:askWhich(now, obs)
     return
   end
   local _, _, candidates = classify.chatOf(self.rules, obs)
-  local choices = {}
+  local choices, seen = {}, {}
   for _, chat in ipairs(candidates or {}) do
-    if type(chat.session) == "string" and #choices < 3 then
+    -- One row per repository, the newest chat of it first. Two chats in the
+    -- same checkout would be two rows with the same name and the same class,
+    -- and the person would be picking between them blind.
+    if type(chat.session) == "string" and not seen[chat.remote] and #choices < MAX_CHAT_CHOICES then
+      seen[chat.remote] = true
       local class = classify.remoteClass(self.rules, chat.remote)
-      choices[#choices + 1] = { id = chat.session, label = shortRepo(chat.remote), colour = COLOURS[class] }
+      choices[#choices + 1] = { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[class] }
     end
   end
   if #choices < 2 then
     return
   end
+  -- The panel waits for an answer now, so the way out of a question asked at a
+  -- bad moment has to be in the list. The cooldown counts from here either way.
+  choices[#choices + 1] = { id = LATER, label = "Later", colour = COLOURS.other }
   local shown = self:ask("which chat are you in?", obs.app, choices, function(id)
-    self:choose(obs.bundle, id)
+    if id == LATER then
+      self:dismiss()
+    else
+      self:choose(obs.bundle, id)
+    end
   end)
   if shown then
     self.asked[key] = now
@@ -537,16 +562,20 @@ end
 
 --- Zyt:ask(headline, what, choices, answered)
 --- Method
---- A small panel under the menu bar with one button per choice, each
---- `{ id, label, colour }`. It goes away by itself after `prompt.seconds`, and
---- nothing changes until it is answered. Returns true when it showed: one panel
---- is up at a time, and a question that lost the place was never asked.
+--- A small panel under the menu bar, one row per choice, each
+--- `{ id, label, colour }`. It stays until it is answered, and nothing changes
+--- while it is up. Returns true when it showed: one panel is up at a time, and a
+--- question that lost the place was never asked.
 function obj:ask(headline, what, choices, answered)
   if self.prompt or #choices == 0 then
     return false
   end
   local screen = hs.screen.mainScreen():frame()
-  local w, h, pad, gap = 380, 92, 14, 10
+  -- A row each, the full width of the panel. Side by side the rows shared the
+  -- width between them, and a repository name is longer than a third of 380
+  -- points: the labels were cut off before they could be read.
+  local w, pad, row, gap, top = 420, 14, 30, 6, 52
+  local h = top + #choices * row + (#choices - 1) * gap + pad
   local canvas = hs.canvas.new({ x = screen.x + screen.w - w - 12, y = screen.y + 6, w = w, h = h })
   canvas:appendElements({
     type = "rectangle",
@@ -566,24 +595,30 @@ function obj:ask(headline, what, choices, answered)
     textColor = { white = 1 },
     frame = { x = pad, y = 26, w = w - 2 * pad, h = 22 },
   })
-  local width = math.floor((w - 2 * pad - gap * (#choices - 1)) / #choices)
   for index, choice in ipairs(choices) do
-    local x = pad + (index - 1) * (width + gap)
+    local y = top + (index - 1) * (row + gap)
     canvas:appendElements({
       id = choice.id,
       type = "rectangle",
       action = "fill",
-      frame = { x = x, y = 54, w = width, h = 28 },
-      fillColor = choice.colour,
+      frame = { x = pad, y = y, w = w - 2 * pad, h = row },
+      fillColor = { white = 1, alpha = 0.1 },
       roundedRectRadii = { xRadius = 6, yRadius = 6 },
       trackMouseUp = true,
+    }, {
+      -- The class is still the blue and the purple of the board and the
+      -- menu bar, now a dot beside the name instead of the whole button.
+      type = "rectangle",
+      action = "fill",
+      frame = { x = pad + 9, y = y + 10, w = 11, h = 11 },
+      fillColor = choice.colour,
+      roundedRectRadii = { xRadius = 3, yRadius = 3 },
     }, {
       type = "text",
       text = choice.label,
       textSize = 13,
       textColor = { white = 1 },
-      textAlignment = "center",
-      frame = { x = x, y = 58, w = width, h = 22 },
+      frame = { x = pad + 30, y = y + 6, w = w - 2 * pad - 40, h = 20 },
     })
   end
   canvas:mouseCallback(function(_, event, id)
@@ -594,12 +629,15 @@ function obj:ask(headline, what, choices, answered)
   canvas:clickActivating(false)
   canvas:level(hs.canvas.windowLevels.floating)
   canvas:show()
-  self.prompt = {
-    canvas = canvas,
-    timer = hs.timer.doAfter(self.rules.prompt.seconds, function()
+  self.prompt = { canvas = canvas }
+  -- A question that takes itself off the screen is one the person watched
+  -- vanish half read, and then the class is decided by nobody. It waits.
+  -- `prompt.seconds` above zero puts the old behaviour back.
+  if self.rules.prompt.seconds > 0 then
+    self.prompt.timer = hs.timer.doAfter(self.rules.prompt.seconds, function()
       self:dismiss()
-    end),
-  }
+    end)
+  end
   return true
 end
 

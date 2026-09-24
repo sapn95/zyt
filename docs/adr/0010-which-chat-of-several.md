@@ -1,6 +1,7 @@
 # 0010 — Which chat, out of the several open in one editor
 
-**Status:** accepted, 2026-09-20.
+**Status:** accepted, 2026-09-20; amended 2026-09-24, the chats are a list and
+every one of them is in it.
 
 ## The problem
 
@@ -54,13 +55,23 @@ is in front. A terminal does know, and
 [ADR 0012](0012-the-pane-in-front-is-the-chat.md) asks it, so what follows is
 about the editors that do not. When the live chats straddle both
 classes the panel from [ADR 0009](0009-ask-once-and-remember.md) opens with the
-repositories as its buttons — `zyt` or `budget`, not Work or Private, because
-the class is already known for each and the open question is which of them the
-person is in. The answer holds for that application until they type into
-another chat, which says where they are more plainly than any button. It is
-kept in memory and not written down: it is an answer about this afternoon, not
-a rule about a repository. The same list is in the menu, so the chat can be
-named without waiting to be asked. Until it is answered, the class is still the
+repositories listed in it — `sapn95/zyt` or `sapn95/budget`, not Work or
+Private, because the class is already known for each and the open question is
+which of them the person is in. The owner is part of the name, since the same
+name under two owners is one of the reasons to be asked in the first place.
+
+One row per repository, the newest chat of it, and every repository that has a
+class gets a row up to eight of them: a panel that showed three and kept the
+fourth to itself was asking about a chat the person could not pick. Two chats in
+one checkout are one row, because two rows with the same name and the same class
+would be a choice made blind. The last row is Later, which answers nothing and
+takes the panel away, and it is there because nothing else does any more.
+
+The answer holds for that application until they type into another chat, which
+says where they are more plainly than a click. It is kept in memory and not
+written down: it is an answer about this afternoon, not a rule about a
+repository. The same list is in the menu, so the chat can be named without
+waiting to be asked. Until it is answered, the class is still the
 chat last typed into, and the tracker keeps running rather than stopping on a
 question ([ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)).
 

@@ -18,7 +18,7 @@ run.
 | `remotes` | `[]` | `{"match": "<substring of the remote URL>", "class": "work"\|"private"}`, first match wins |
 | `apps` | `{}` | Application name to `"work"`, `"private"` or `"repo"` |
 | `titles` | `[]` | `{"contains": "<text>", "class": …}`, case-insensitive, first match wins |
-| `prompt` | `{"enabled": true, "seconds": 20, "cooldownSeconds": 1800}` | The panel that asks when nothing else knows: whether, how long it stays, how long before an unanswered question is asked again ([ADR 0009](adr/0009-ask-once-and-remember.md)) |
+| `prompt` | `{"enabled": true, "seconds": 0, "cooldownSeconds": 1800}` | The panel that asks when nothing else knows: whether, how long it stays up (`0` waits for an answer), how long before an unanswered question is asked again ([ADR 0009](adr/0009-ask-once-and-remember.md)) |
 | `report` | see below | The booking rules |
 
 ## How a moment is classified
