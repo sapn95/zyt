@@ -556,9 +556,10 @@ end
 --- Method
 --- A small panel under the menu bar, one row per choice, each
 --- `{ id, label, colour }`. It stays until it is answered, and nothing changes
---- while it is up. `about` is the key the question is about. Returns true when it
---- showed: one panel is up at a time, and a question that lost the place was
---- never asked.
+--- while it is up. `about` is the key the question is about; a question that
+--- loses the panel to another one has its cooldown dropped, so it can be asked
+--- again. Returns true when it showed: one panel is up at a time, and a question
+--- that lost the place was never asked.
 function obj:ask(headline, what, choices, answered, about)
   if #choices == 0 then
     return false
@@ -576,6 +577,12 @@ function obj:ask(headline, what, choices, answered, about)
     -- asked, and a chat opened since belongs in the list it is offering.
     if self.prompt.question == question then
       return false
+    end
+    -- The question that loses the panel keeps its turn. Its cooldown was spent
+    -- on a panel nobody answered, and half an hour is a long time to hold a
+    -- window against an answer it never got.
+    if self.prompt.about ~= nil then
+      self.asked[self.prompt.about] = nil
     end
     self:dismiss()
   end
@@ -638,7 +645,7 @@ function obj:ask(headline, what, choices, answered, about)
   canvas:clickActivating(false)
   canvas:level(hs.canvas.windowLevels.floating)
   canvas:show()
-  self.prompt = { canvas = canvas, question = question }
+  self.prompt = { canvas = canvas, question = question, about = about }
   -- A question that takes itself off the screen is one the person watched
   -- vanish half read, and then the class is decided by nobody. It waits.
   -- `prompt.seconds` above zero puts the old behaviour back.
