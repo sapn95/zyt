@@ -1,6 +1,7 @@
 # 0009 — Ask once, and remember the answer
 
-**Status:** accepted, 2026-09-20.
+**Status:** accepted, 2026-09-20; amended 2026-09-24, the panel waits for its
+answer and lists the choices.
 
 ## The problem
 
@@ -14,17 +15,25 @@ the class is whatever happened to be running before.
 
 When no rule and no earlier answer knows a window, the Spoon asks. A small
 panel appears under the menu bar naming the repository (or, without one, the
-application) with three buttons: Work, Private, Don't ask. The answer is
-written to `learned.json` in the state directory under `remote:<url>` or
-`app:<name>` and is used from then on; Don't ask records `inherit`, which
-keeps [ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)'s behaviour for
-windows that genuinely have no side, such as Finder.
+application) with the choices listed under it, a row each: Work, Private, Don't
+ask. A row is the full width of the panel, which is what a repository name
+needs; three of them side by side had a third of it each and the names were cut
+off before they could be read. The answer is written to `learned.json` in the
+state directory under `remote:<url>` or `app:<name>` and is used from then on;
+Don't ask records `inherit`, which keeps
+[ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)'s behaviour for windows
+that genuinely have no side, such as Finder.
 
-The panel does not block anything: it goes away by itself after
-`prompt.seconds`, an unanswered question is not repeated for
-`prompt.cooldownSeconds`, and the class stays what it was until there is an
-answer. It is only shown while the person is at the keyboard (idle under two
-minutes) and the screen is unlocked; a lock takes it down.
+The panel does not block anything, and it waits. It stays on the screen until it
+is answered, because a question that takes itself away after twenty seconds is
+one the person watched vanish half read, and the cooldown had already been spent
+on it: the same window then goes half an hour with nobody having decided whose
+time it is. `prompt.seconds` above zero puts the countdown back for anyone who
+wants one. An unanswered question is not repeated for `prompt.cooldownSeconds`,
+and the class stays what it was until there is an answer. It is only shown while
+the person is at the keyboard (idle under two minutes) and the screen is
+unlocked; a lock takes it down, which is also what clears a panel left standing
+over lunch.
 
 The rules file keeps the answers that should be versioned and explained; the
 learned file holds the rest. Moving an answer from one to the other is a copy.
