@@ -37,7 +37,9 @@ over lunch. One panel is up at a time, and the newest question has it: the same
 question again leaves the panel alone, and anything else takes the place. With
 nothing clearing a panel on a timer, a question standing unanswered about a
 window nobody is at would otherwise be the last one ever asked, and a chat opened
-since would be missing from the list it offers.
+since would be missing from the list it offers. The question that loses the panel
+gets its turn back: its cooldown was spent on a panel nobody answered, and it
+would otherwise sit out half an hour for having been interrupted.
 
 The rules file keeps the answers that should be versioned and explained; the
 learned file holds the rest. Moving an answer from one to the other is a copy.
