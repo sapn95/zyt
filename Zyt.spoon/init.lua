@@ -485,7 +485,11 @@ function obj:askWhich(now, obs)
   if not self.rules.prompt.enabled or not idleIsShort(obs.idle) then
     return
   end
-  if not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
+  -- A panel standing for this question is kept current. The cooldown is there to
+  -- stop the question being asked again, not to freeze the list while it waits:
+  -- a chat that has closed since would stay in it, offering a session that ended.
+  local standing = self.prompt ~= nil and self.prompt.about == key
+  if not standing and not learned.due(self.asked, key, now, self.rules.prompt.cooldownSeconds) then
     return
   end
   local choices = {}
@@ -494,6 +498,11 @@ function obj:askWhich(now, obs)
       { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[chat.class], class = chat.class }
   end
   if #choices < 2 then
+    -- The chats stopped disagreeing, so there is nothing left to pick between
+    -- and the panel is asking about an afternoon that has moved on.
+    if standing then
+      self:dismiss()
+    end
     return
   end
   -- The panel waits for an answer now, so the way out of a question asked at a

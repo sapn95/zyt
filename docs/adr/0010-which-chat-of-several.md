@@ -70,6 +70,11 @@ straddle both classes and a list with one class in it has no answer in it. The
 last row is Later, which answers nothing and takes the panel away, and it is
 there because nothing else does any more.
 
+A panel that is waiting has its list rebuilt on every tick. A chat that has
+closed drops out of it, one opened since comes into it, and once the chats stop
+disagreeing the panel goes on its own: the cooldown holds the question back, not
+the list the panel is showing while it waits.
+
 The answer holds for that application until they type into another chat, which
 says where they are more plainly than a click. It is kept in memory and not
 written down: it is an answer about this afternoon, not a rule about a
