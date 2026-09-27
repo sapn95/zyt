@@ -33,8 +33,11 @@ wants one. An unanswered question is not repeated for `prompt.cooldownSeconds`,
 and the class stays what it was until there is an answer. It is only shown while
 the person is at the keyboard (idle under two minutes) and the screen is
 unlocked; a lock takes it down, which is also what clears a panel left standing
-over lunch. One panel is up at a time, and the newest question has it: the same
-question again leaves the panel alone, and anything else takes the place. With
+over lunch. So does an answer arriving some other way: somebody typing into one
+of the chats a question is about has said which one they are in, and the panel
+goes ([ADR 0010](0010-which-chat-of-several.md)). One panel is up at a time, and
+the newest question has it: the same question again leaves the panel alone, and
+anything else takes the place. With
 nothing clearing a panel on a timer, a question standing unanswered about a
 window nobody is at would otherwise be the last one ever asked, and a chat opened
 since would be missing from the list it offers. The question that loses the panel

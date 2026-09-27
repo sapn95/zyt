@@ -60,6 +60,16 @@ Private, because the class is already known for each and the open question is
 which of them the person is in. The owner is part of the name, since the same
 name under two owners is one of the reasons to be asked in the first place.
 
+Typing is an answer, and it comes first. A prompt sent within `typingSeconds`
+(two minutes) says which chat the person is in more plainly than a click on a
+panel could, and it is newer than any answer they could give one, so while it is
+that fresh nothing is asked and a panel already standing goes away. The cooldown
+stays where it is when a panel goes like that: the question was answered, not
+missed. It wears off because the reason the question exists is the other chat,
+the one they turn to while this one works, and that is what makes it rare. It is
+put to somebody who has been reading rather than typing, which is exactly when
+nothing else can tell.
+
 One row per repository, the newest chat of it, and every repository that has a
 class gets a row up to eight of them: a panel that showed three and kept the
 fourth to itself was asking about a chat the person could not pick. Two chats in

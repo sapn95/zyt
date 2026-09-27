@@ -12,6 +12,7 @@ M.defaults = {
   idleSeconds = 600,
   signalSeconds = 300,
   chatSeconds = 14400,
+  typingSeconds = 120,
   noIdleApps = {},
   repoRoots = { "~/git" },
   remotes = {},
@@ -59,7 +60,7 @@ function M.normalise(raw, home)
   if not CLASSES[rules.defaultClass] then
     return fail("defaultClass has to be work or private, not %q", tostring(rules.defaultClass))
   end
-  for _, key in ipairs({ "tickSeconds", "idleSeconds", "signalSeconds", "chatSeconds" }) do
+  for _, key in ipairs({ "tickSeconds", "idleSeconds", "signalSeconds", "chatSeconds", "typingSeconds" }) do
     if type(rules[key]) ~= "number" or rules[key] <= 0 then
       return fail("%s has to be a positive number", key)
     end
