@@ -87,7 +87,7 @@ jobs:
         run: |
           luacov
           lua scripts/coverage-floor.lua
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           # The python3 a Mac ships with. The command line may need nothing
           # newer, and nothing beyond the standard library.
