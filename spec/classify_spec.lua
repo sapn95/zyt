@@ -96,8 +96,10 @@ describe("classify.decide", function()
     end)
 
     it("counts every chat of this application, not only the last one typed into", function()
+      -- Both prompts are old enough that neither of them answers the question:
+      -- what is being read here is which chats count, not who is typing.
       local work = {
-        age = 60,
+        age = 300,
         promptAt = 200,
         session = "w",
         remote = "ssh://git@git.example.com:7999/team/infra.git",
@@ -149,11 +151,13 @@ describe("classify.decide", function()
     end)
 
     it("offers as candidates only the chats the rules have a class for", function()
+      -- Nothing has been typed into for a while: a prompt of a minute ago would
+      -- answer the question by itself, and there would be nothing to offer.
       local chats = {
-        { age = 1, promptAt = 3, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
-        { age = 2, promptAt = 2, session = "b", remote = "git@example.org:me/elsewhere.git", bundle = "b" },
+        { age = 300, promptAt = 3, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
+        { age = 600, promptAt = 2, session = "b", remote = "git@example.org:me/elsewhere.git", bundle = "b" },
         {
-          age = 3,
+          age = 900,
           promptAt = 1,
           session = "c",
           remote = "ssh://git@git.example.com:7999/team/infra.git",
@@ -166,6 +170,50 @@ describe("classify.decide", function()
       assert.same({ "a", "c" }, { candidates[1].session, candidates[2].session })
       assert.equal(2, #candidates)
       assert.is_nil(classify.chatOf(R, { bundle = "b", chats = {} }))
+    end)
+
+    it("asks nobody about the chat they are typing into", function()
+      local chats = {
+        { age = 5, promptAt = 400, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
+        {
+          age = 900,
+          promptAt = 100,
+          session = "c",
+          remote = "ssh://git@git.example.com:7999/team/infra.git",
+          bundle = "b",
+        },
+      }
+      local obs = { app = "Code", bundle = "b", title = "git", chats = chats, resolve = resolve }
+      -- the two chats straddle both classes, so the panel would open, except
+      -- that the person is typing into one of them and has said where they are
+      local remote, unsure = classify.chatOf(R, obs)
+      assert.equal("git@github.com:me/budget.git", remote)
+      assert.is_nil(unsure)
+      -- the third value is nil, so nothing here is unsure
+      assert.same({ "private", "chat" }, { decide(obs) })
+      -- once the prompt is older than typingSeconds the question is a question
+      -- again: this is the chat they left running while they read the other one
+      chats[1].age = 121
+      local _, later = classify.chatOf(R, obs)
+      assert.is_true(later)
+    end)
+
+    it("leaves a pick the caller still stands by in charge of a fresh prompt", function()
+      -- The caller drops a pick as soon as another chat is typed into, because
+      -- it knows when the pick was made and this does not. A pick that reaches
+      -- here is one made after the prompt, and it decides.
+      local chats = {
+        { age = 5, promptAt = 400, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
+        {
+          age = 900,
+          promptAt = 100,
+          session = "c",
+          remote = "ssh://git@git.example.com:7999/team/infra.git",
+          bundle = "b",
+        },
+      }
+      local obs = { app = "Code", bundle = "b", title = "git", chats = chats, chosen = "c", resolve = resolve }
+      assert.same({ "work", "chat" }, { decide(obs) })
     end)
 
     it("takes the chat in the pane the terminal says is in front", function()
