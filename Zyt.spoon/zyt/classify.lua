@@ -121,8 +121,10 @@ end
 ---
 --- Returns remote, unsure, candidates. `unsure` says the answer is a guess:
 --- the live chats straddle both classes, and nothing on screen says which
---- panel is in front, so only the person can. `candidates` are the chats whose
---- repository the rules do have a class for — the ones worth offering.
+--- panel is in front, so only the person can. A prompt typed within
+--- `typingSeconds` is not a guess, and nobody is asked about it. `candidates`
+--- are the chats whose repository the rules do have a class for — the ones
+--- worth offering.
 ---
 --- The newest chat is the pick even when the rules have no class for its
 --- repository, and then the caller ends up asking about that repository rather
@@ -152,7 +154,19 @@ function M.chatOf(rules, obs)
       end
     end
   end
-  local told = inPane ~= nil or (obs.chosen ~= nil and pick.session == obs.chosen)
+  -- Somebody who has just typed into a chat is in that chat. The prompt says so
+  -- more plainly than a click would, it is newer than any answer they could
+  -- give, and a panel put in front of them in that second is asking about the
+  -- window they are looking at. It wears off, because the reason the question
+  -- exists at all is the other chat they turn to while this one works.
+  --
+  -- A pick still beats a prompt here, and that is the caller's business rather
+  -- than an order of precedence: a pick is only passed in while it stands, and
+  -- a prompt typed into another chat after it was made is what ends it. The
+  -- times that decision needs are the caller's; this function is handed a
+  -- session id and no clock.
+  local typing = type(chats[1].age) == "number" and chats[1].age <= rules.typingSeconds
+  local told = typing or inPane ~= nil or (obs.chosen ~= nil and pick.session == obs.chosen)
   local unsure
   if kinds > 1 and not told then
     unsure = true

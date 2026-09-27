@@ -356,9 +356,7 @@ function obj:observe(now)
     return { class = self.override, source = "manual", app = app }
   end
   local class, source, unsure = classify.decide(self.rules, obs)
-  if unsure then
-    self:askWhich(now, obs)
-  end
+  self:askWhich(now, obs, unsure)
   if not class then
     class, source = self:recall(now, obs, key, remote)
   end
@@ -478,10 +476,24 @@ end
 --- nothing on screen says which panel is in front. Ask, with the repositories
 --- as the list, at most once per cooldown and only while somebody is there to
 --- answer. Until they do, the class is the chat they last typed into.
-function obj:askWhich(now, obs)
+---
+--- Called on every tick, whether the question is open or not: `unsure` says it
+--- is, and the panel belongs to this method either way.
+function obj:askWhich(now, obs, unsure)
   -- Keyed the way the named chat itself is, by the application hosting it, so
   -- that forgetting one answer clears both.
   local key = chatKey(obs.bundle)
+  local standing = self.prompt ~= nil and self.prompt.about == key
+  if not unsure then
+    -- The question has stopped being one. Somebody typed into one of the chats,
+    -- or the terminal named the pane in front, and a panel left standing is
+    -- asking for an answer that has been given. The cooldown stays where it is:
+    -- this one was answered, unlike a panel nobody ever saw.
+    if standing then
+      self:dismiss()
+    end
+    return
+  end
   if not self.rules.prompt.enabled then
     return
   end
@@ -490,7 +502,6 @@ function obj:askWhich(now, obs)
   -- ask; keeping a list honest while it waits takes nothing, and a chat that
   -- closed while the person was away would otherwise still be in it, offering a
   -- session that ended.
-  local standing = self.prompt ~= nil and self.prompt.about == key
   if not standing then
     if not idleIsShort(obs.idle) then
       return
