@@ -225,7 +225,14 @@ local MAX_CHAT_CHOICES = 8
 -- How much of a transcript is read to find the name a chat goes by, and how
 -- long that answer is kept before the file is read again. The name changes as a
 -- conversation goes on, and a chat that has just started has none yet.
-local TRANSCRIPT_TAIL = 128 * 1024
+--
+-- The tool rewrites the name on every exchange, so the end of the file is where
+-- it is. Measured over the seventeen transcripts on this machine that carry a
+-- name somebody typed in: the newest of them sat 28.9 KB from the end at the
+-- worst, in a file of 37 MB, always within a hundred bytes of the newest name
+-- the tool made up. A quarter of a megabyte is that with room to spare, and a
+-- name that fell out of it would come back on the next exchange.
+local TRANSCRIPT_TAIL = 256 * 1024
 local TITLE_SECONDS = 300
 
 -- How many lines of a kind are worth trying. The newest is the answer unless it
@@ -376,6 +383,11 @@ function obj:titleOf(session, now)
     return nil
   end
   local found = self.titles[session]
+  -- An answer about another directory of transcripts is no answer about this
+  -- one, and the path it holds is a path in there.
+  if found and found.root ~= self.transcripts then
+    found = nil
+  end
   if found and now - found.at < TITLE_SECONDS then
     return found.title
   end
@@ -391,7 +403,7 @@ function obj:titleOf(session, now)
       title = titleIn(again)
     end
   end
-  self.titles[session] = { path = path, title = title, at = now }
+  self.titles[session] = { root = self.transcripts, path = path, title = title, at = now }
   return title
 end
 

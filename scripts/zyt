@@ -50,8 +50,11 @@ SESSION_LOCK = ".lock"
 UNKNOWN = object()
 
 # How much of a transcript is read to find the title, and how long a title may
-# be before it is cut.
-TRANSCRIPT_TAIL = 128 * 1024
+# be before it is cut. The tool rewrites the title on every exchange, so the end
+# of the file is where it is: measured over the seventeen transcripts on this
+# machine that carry a title somebody typed in by hand, the newest of them sat
+# 28.9 KB from the end at the worst, in a file of 37 MB.
+TRANSCRIPT_TAIL = 256 * 1024
 TITLE_MAX = 60
 
 REPORT_DEFAULTS = {
