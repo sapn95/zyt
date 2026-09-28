@@ -27,6 +27,7 @@ local repo = require("zyt.repo")
 local tracker = require("zyt.tracker")
 local totals = require("zyt.totals")
 local learned = require("zyt.learned")
+local transcript = require("zyt.transcript")
 
 local HOME = os.getenv("HOME")
 
@@ -78,6 +79,11 @@ obj.asleep = false
 --- Per application, the chat the person said they were in, and when they said
 --- it. In memory only: it is an answer about this afternoon, not a rule.
 obj.chosen = {}
+
+--- Per session, the name its transcript gave it and where that file is. In
+--- memory only, and reread from time to time: a name moves with the
+--- conversation it is about.
+obj.titles = {}
 
 -- ---------------------------------------------------------------------------
 -- Files
@@ -212,6 +218,14 @@ local COLOURS = {
 -- keeps a chat of each class in the list when it has to cut one.
 local MAX_CHAT_CHOICES = 8
 
+-- Where the coding tool keeps its transcripts, how much of one is read to find
+-- the name a chat has given itself, and how long that answer is kept before the
+-- file is read again. The name changes as a conversation goes on, and a chat
+-- that has just started has none yet.
+local TRANSCRIPTS = HOME .. "/.claude/projects"
+local TRANSCRIPT_TAIL = 128 * 1024
+local TITLE_SECONDS = 300
+
 -- How much of a chat's name one row holds. Measured rather than guessed: the
 -- panel is 420 points wide, and at 13 point a row of fifty characters ends
 -- about fifteen points short of its own edge.
@@ -295,6 +309,86 @@ end
 --- id of its own leaves only that one, and dropping it would hand the window to
 --- some other application's session. An older session note of that application
 --- is a different chat and does not speak for it.
+--- A session id, if it is one: it becomes part of a path, and what is in the
+--- note came from a file somebody else wrote.
+local function isSessionName(session)
+  return type(session) == "string" and session:match("^[%w][%w%.%-_]*$") ~= nil
+end
+
+--- The transcript of one session, wherever the tool filed it. The directory is
+--- named after where the session started, which is not where it ended up
+--- working, so the directories are searched rather than worked out.
+local function transcriptPath(session)
+  local ok, iterator, directoryObject = pcall(hs.fs.dir, TRANSCRIPTS)
+  if not ok or not iterator then
+    return nil
+  end
+  for name in iterator, directoryObject do
+    if name ~= "." and name ~= ".." then
+      local candidate = ("%s/%s/%s.jsonl"):format(TRANSCRIPTS, name, session)
+      if hs.fs.attributes(candidate, "mode") == "file" then
+        return candidate
+      end
+    end
+  end
+  return nil
+end
+
+--- The name a chat has given itself, out of the end of its transcript: what the
+--- tool calls the conversation, or failing that the last thing typed into it.
+--- The core picks the lines and this decodes them, because they are JSON.
+local function titleIn(path)
+  local file = io.open(path, "rb")
+  if not file then
+    return nil
+  end
+  local size = file:seek("end")
+  file:seek("set", math.max(0, size - TRANSCRIPT_TAIL))
+  local text = file:read("a")
+  file:close()
+  local titleLine, promptLine = transcript.newest(text)
+  local function field(line, key)
+    if not line then
+      return nil
+    end
+    local ok, decoded = pcall(hs.json.decode, line)
+    if ok and type(decoded) == "table" and type(decoded[key]) == "string" and decoded[key] ~= "" then
+      return decoded[key]
+    end
+    return nil
+  end
+  return field(titleLine, "aiTitle") or field(promptLine, "lastPrompt")
+end
+
+--- What a chat calls itself, for the rows of a list of them. The hook writes it
+--- into the note on every prompt, and this is for the notes that have none: a
+--- chat that has been read but not typed into since the Spoon last started, and
+--- every note written before there were titles. Found once and kept for
+--- `TITLE_SECONDS`, because the name moves with the conversation.
+function obj:titleOf(session, now)
+  if not isSessionName(session) then
+    return nil
+  end
+  local found = self.titles[session]
+  if found and now - found.at < TITLE_SECONDS then
+    return found.title
+  end
+  local path = (found and found.path) or transcriptPath(session)
+  local title = path and titleIn(path) or nil
+  if not title and path then
+    -- The path it had is where the file was. A session that came back under
+    -- another directory, or one whose transcript has been tidied away, is worth
+    -- looking for again rather than being nameless from here on.
+    local again = transcriptPath(session)
+    if again and again ~= path then
+      path = again
+      title = titleIn(again)
+    end
+  end
+  self.titles[session] = { path = path, title = title, at = now }
+  return title
+end
+
 function obj:chats()
   local directory = self.statePath .. "/sessions"
   local out = {}
@@ -308,11 +402,16 @@ function obj:chats()
       if name:sub(-5) == ".json" then
         local decoded = readJSON(directory .. "/" .. name)
         if decoded and type(decoded.promptAt) == "number" then
+          -- A note too old to be a chat is not worth a file to read.
+          local fresh = decoded.source == "claude-code" and now - decoded.promptAt <= self.rules.chatSeconds
           out[#out + 1] = {
             age = now - decoded.promptAt,
             promptAt = decoded.promptAt,
             remote = decoded.remote,
-            title = decoded.title,
+            -- The note first, since the hook wrote it at the prompt and it
+            -- costs nothing; the transcript for the chats that have not been
+            -- typed into since.
+            title = decoded.title or (fresh and self:titleOf(decoded.session, now)) or nil,
             source = decoded.source,
             bundle = decoded.bundle,
             pane = decoded.pane,
