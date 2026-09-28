@@ -111,7 +111,10 @@ can be half of one: the file is appended to while it is read, and a slice taken
 from the end of a long one starts in the middle of a line. Which half is which
 is for the decoder to say rather than for a pattern to guess at, and the line
 before it is the answer either way. What it finds is kept for five minutes,
-because a name moves with the conversation it is about. The hook writing the title at the prompt is what keeps
+because a name moves with the conversation it is about. A quarter of a megabyte
+of the end is enough of it: the tool rewrites the name on every exchange, and
+over the transcripts on this machine that carry a name somebody typed in, the
+newest of them was 28.9 KB from the end at the worst, in a file of 37 MB. The hook writing the title at the prompt is what keeps
 that from having to happen at all, and a note too old to be a live chat is not
 worth a file to read. The colour goes on saying work or private, so dropping the name
 of the checkout costs the row nothing.
