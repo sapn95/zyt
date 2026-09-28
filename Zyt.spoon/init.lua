@@ -212,6 +212,11 @@ local COLOURS = {
 -- keeps a chat of each class in the list when it has to cut one.
 local MAX_CHAT_CHOICES = 8
 
+-- How much of a chat's name one row holds. Measured rather than guessed: the
+-- panel is 420 points wide, and at 13 point a row of fifty characters ends
+-- about fifteen points short of its own edge.
+local CHAT_LABEL_CHARS = 50
+
 -- The row that answers nothing. A session id is a UUID, so this cannot be one.
 local LATER = "zyt:later"
 
@@ -307,6 +312,7 @@ function obj:chats()
             age = now - decoded.promptAt,
             promptAt = decoded.promptAt,
             remote = decoded.remote,
+            title = decoded.title,
             source = decoded.source,
             bundle = decoded.bundle,
             pane = decoded.pane,
@@ -410,8 +416,14 @@ end
 
 --- The cooldown on asking which chat somebody is in is per application, the
 --- same as the chat they named, so that forgetting one answer clears both.
+local CHAT_PREFIX = "chat:"
+
 local function chatKey(bundle)
-  return "chat:" .. (bundle or "")
+  return CHAT_PREFIX .. (bundle or "")
+end
+
+local function isChatKey(key)
+  return type(key) == "string" and key:sub(1, #CHAT_PREFIX) == CHAT_PREFIX
 end
 
 --- The chat the person named for this application, while that choice still
@@ -484,6 +496,14 @@ function obj:askWhich(now, obs, unsure)
   -- that forgetting one answer clears both.
   local key = chatKey(obs.bundle)
   local standing = self.prompt ~= nil and self.prompt.about == key
+  -- A question about the chats of one application is a question about the
+  -- window in front. With another application there it cannot change what is
+  -- being recorded, nothing is keeping its list current, and a chat it names
+  -- may have ended while it stood: it goes, and the cooldown stays, because a
+  -- question somebody saw and walked away from is the Later row by other means.
+  if not standing and self.prompt and isChatKey(self.prompt.about) then
+    self:dismiss()
+  end
   if not unsure then
     -- The question has stopped being one. Somebody typed into one of the chats,
     -- or the terminal named the pane in front, and a panel left standing is
@@ -512,8 +532,11 @@ function obj:askWhich(now, obs, unsure)
   end
   local choices = {}
   for _, chat in ipairs(classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)) do
-    choices[#choices + 1] =
-      { id = chat.session, label = repoLabel(chat.remote), colour = COLOURS[chat.class], class = chat.class }
+    -- The name the chat gave itself, because that is what the person is looking
+    -- at while they read it. A repository is what decides the class, and the
+    -- colour already says which one that came out as.
+    local label = classify.chatLabel(chat, CHAT_LABEL_CHARS) or repoLabel(chat.remote)
+    choices[#choices + 1] = { id = chat.session, label = label, colour = COLOURS[chat.class], class = chat.class }
   end
   if #choices < 2 then
     -- The chats stopped disagreeing, so there is nothing left to pick between
@@ -881,8 +904,10 @@ function obj:chatMenu()
     local inFront = seen.inPane ~= nil and seen.inPane == chat.session
     local picked = seen.inPane == nil and choice ~= nil and choice.session == chat.session
     items[#items + 1] = {
-      title = ("%s · %s · typed %s"):format(
-        shortRepo(chat.remote) .. (inFront and " (in front)" or ""),
+      title = ("%s%s · %s · %s · typed %s"):format(
+        classify.chatLabel(chat, CHAT_LABEL_CHARS) or repoLabel(chat.remote),
+        inFront and " (in front)" or "",
+        shortRepo(chat.remote),
         classify.remoteClass(self.rules, chat.remote) or "unknown",
         os.date("%H:%M", chat.promptAt)
       ),

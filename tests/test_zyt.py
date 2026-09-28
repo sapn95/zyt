@@ -594,6 +594,83 @@ class Hook(unittest.TestCase):
             self.assertFalse((directory / "old.json").exists())
             self.assertTrue((directory / zyt.SESSION_LOCK).exists())
 
+    def test_the_title_is_the_name_the_chat_gave_itself(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    json.dumps(entry)
+                    for entry in (
+                        {"type": "ai-title", "aiTitle": "An older name"},
+                        {"type": "user", "message": {"content": "hello"}},
+                        {"type": "ai-title", "aiTitle": "  The filer  chargeback\n numbers "},
+                        {"type": "last-prompt", "lastPrompt": "and what about the rest"},
+                    )
+                )
+                + "\n"
+            )
+            # the newest title wins, and it arrives as one line
+            self.assertEqual(zyt.chat_title(str(transcript)), "The filer chargeback numbers")
+
+    def test_a_transcript_with_no_title_yet_offers_the_last_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "last-prompt", "lastPrompt": "why does it keep asking me"}) + "\n"
+            )
+            self.assertEqual(zyt.chat_title(str(transcript)), "why does it keep asking me")
+
+    def test_a_title_longer_than_a_row_is_cut(self):
+        self.assertEqual(zyt.one_line("x" * 200), "x" * (zyt.TITLE_MAX - 1) + "\u2026")
+        self.assertEqual(zyt.one_line("  two   words "), "two words")
+
+    def test_a_transcript_nobody_can_read_says_nothing(self):
+        self.assertEqual(zyt.chat_title("/nowhere/session.jsonl"), "")
+        self.assertEqual(zyt.chat_title(None), "")
+        self.assertEqual(zyt.chat_title(""), "")
+
+    def test_only_the_end_of_a_long_transcript_is_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session.jsonl"
+            older = json.dumps({"type": "ai-title", "aiTitle": "Out of reach"})
+            newest = json.dumps({"type": "ai-title", "aiTitle": "Within reach"})
+            transcript.write_text(older + "\n" + " " * 4096 + "\n" + newest + "\n")
+            tail = zyt.TRANSCRIPT_TAIL
+            zyt.TRANSCRIPT_TAIL = 200
+            try:
+                # the slice starts in the middle of a line, which json says is no
+                # line, and the entry before it is out of reach rather than wrong
+                self.assertEqual(zyt.chat_title(str(transcript)), "Within reach")
+            finally:
+                zyt.TRANSCRIPT_TAIL = tail
+
+    def test_the_title_follows_the_prompt_and_is_kept_between_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            first = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, title="A name")
+            self.assertEqual(first["title"], "A name")
+            # a tool event knows nothing about what the chat is called
+            worked = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state)
+            self.assertEqual(worked["title"], "A name")
+            # and an event that arrives late does not bring the old name back
+            late = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, title="Older", at=1)
+            self.assertEqual(late["title"], "A name")
+            newer = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, title="A new name")
+            self.assertEqual(newer["title"], "A new name")
+
+    def test_a_prompt_behind_a_tool_event_still_brings_its_title(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, title="A name", at=1000)
+            # a tool event of the same session got the lock first
+            zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state, at=2000)
+            # and the prompt that waited on git is still the newest prompt there
+            # is, which is the one this title belongs to
+            late = zyt.write_session(
+                "claude-code", tmp, "abc", True, remote=None, state=state, title="A newer name", at=1500
+            )
+            self.assertEqual((late["promptAt"], late["title"]), (1500, "A newer name"))
+
     def test_a_session_that_has_only_worked_is_no_chat(self):
         with tempfile.TemporaryDirectory() as tmp:
             note = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=Path(tmp) / "state")
