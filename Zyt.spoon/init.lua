@@ -85,6 +85,10 @@ obj.chosen = {}
 --- conversation it is about.
 obj.titles = {}
 
+--- Where the coding tool keeps its transcripts, one directory per checkout a
+--- session was started in.
+obj.transcripts = HOME .. "/.claude/projects"
+
 -- ---------------------------------------------------------------------------
 -- Files
 
@@ -218,13 +222,15 @@ local COLOURS = {
 -- keeps a chat of each class in the list when it has to cut one.
 local MAX_CHAT_CHOICES = 8
 
--- Where the coding tool keeps its transcripts, how much of one is read to find
--- the name a chat has given itself, and how long that answer is kept before the
--- file is read again. The name changes as a conversation goes on, and a chat
--- that has just started has none yet.
-local TRANSCRIPTS = HOME .. "/.claude/projects"
+-- How much of a transcript is read to find the name a chat goes by, and how
+-- long that answer is kept before the file is read again. The name changes as a
+-- conversation goes on, and a chat that has just started has none yet.
 local TRANSCRIPT_TAIL = 128 * 1024
 local TITLE_SECONDS = 300
+
+-- How many lines of a kind are worth trying. The newest is the answer unless it
+-- was half written when it was read, and the one before it is then.
+local TITLE_TRIES = 3
 
 -- How much of a chat's name one row holds. Measured rather than guessed: the
 -- panel is 420 points wide, and at 13 point a row of fifty characters ends
@@ -318,14 +324,14 @@ end
 --- The transcript of one session, wherever the tool filed it. The directory is
 --- named after where the session started, which is not where it ended up
 --- working, so the directories are searched rather than worked out.
-local function transcriptPath(session)
-  local ok, iterator, directoryObject = pcall(hs.fs.dir, TRANSCRIPTS)
+local function transcriptPath(root, session)
+  local ok, iterator, directoryObject = pcall(hs.fs.dir, root)
   if not ok or not iterator then
     return nil
   end
   for name in iterator, directoryObject do
     if name ~= "." and name ~= ".." then
-      local candidate = ("%s/%s/%s.jsonl"):format(TRANSCRIPTS, name, session)
+      local candidate = ("%s/%s/%s.jsonl"):format(root, name, session)
       if hs.fs.attributes(candidate, "mode") == "file" then
         return candidate
       end
@@ -346,18 +352,18 @@ local function titleIn(path)
   file:seek("set", math.max(0, size - TRANSCRIPT_TAIL))
   local text = file:read("a")
   file:close()
-  local titleLine, promptLine = transcript.newest(text)
-  local function field(line, key)
-    if not line then
-      return nil
+  for _, candidate in ipairs(transcript.naming(text, TITLE_TRIES)) do
+    local ok, decoded = pcall(hs.json.decode, candidate.line)
+    if ok and type(decoded) == "table" then
+      local named = decoded[candidate.key]
+      -- A name of nothing but spaces is no name: it would take the place of the
+      -- one underneath it and leave the row with nothing to say.
+      if type(named) == "string" and named:match("%S") then
+        return named
+      end
     end
-    local ok, decoded = pcall(hs.json.decode, line)
-    if ok and type(decoded) == "table" and type(decoded[key]) == "string" and decoded[key] ~= "" then
-      return decoded[key]
-    end
-    return nil
   end
-  return field(titleLine, "aiTitle") or field(promptLine, "lastPrompt")
+  return nil
 end
 
 --- What a chat calls itself, for the rows of a list of them. The hook writes it
@@ -373,13 +379,13 @@ function obj:titleOf(session, now)
   if found and now - found.at < TITLE_SECONDS then
     return found.title
   end
-  local path = (found and found.path) or transcriptPath(session)
+  local path = (found and found.path) or transcriptPath(self.transcripts, session)
   local title = path and titleIn(path) or nil
   if not title and path then
     -- The path it had is where the file was. A session that came back under
     -- another directory, or one whose transcript has been tidied away, is worth
     -- looking for again rather than being nameless from here on.
-    local again = transcriptPath(session)
+    local again = transcriptPath(self.transcripts, session)
     if again and again ~= path then
       path = again
       title = titleIn(again)

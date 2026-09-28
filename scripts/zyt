@@ -991,13 +991,20 @@ def one_line(text, limit: int = TITLE_MAX) -> str:
     return cut[: limit - 1].rstrip() + "\u2026"
 
 
+# What can name a chat, in the order it counts: a name the person typed in
+# themselves is the name they read in their own list, whatever the tool has
+# called the conversation since, and failing both the last thing typed into it
+# says which chat this is as well as anything.
+TITLE_KINDS = (("custom-title", "customTitle"), ("ai-title", "aiTitle"), ("last-prompt", "lastPrompt"))
+
+
 def chat_title(transcript) -> str:
-    """The name a chat has given itself, for the list the Spoon offers when it
-    has to ask which one somebody is in. Claude Code writes an `ai-title` entry
-    into the transcript and rewrites it as the conversation moves on, and that
-    is the title the person reads in their own chat list. Without one, the last
-    thing they typed there says as much. Empty when the file says neither, and
-    then the Spoon falls back to the repository.
+    """The name a chat goes by, for the list the Spoon offers when it has to ask
+    which one somebody is in. Claude Code writes a `custom-title` entry when the
+    chat has been renamed by hand and an `ai-title` entry otherwise, rewriting
+    the latter as the conversation moves on, and one of those is the title the
+    person reads in their own chat list. Empty when the file names it in no way
+    at all, and then the Spoon falls back to the repository.
 
     Only the end of the file is read. The entry is rewritten on every exchange,
     so that is where the current one is, and a long conversation is a large file
@@ -1012,10 +1019,11 @@ def chat_title(transcript) -> str:
             tail = handle.read().decode("utf-8", "replace")
     except OSError:
         return ""
-    fallback = ""
-    # Backwards, because the newest entry is the one that counts. The first line
-    # of the slice is half a line whenever the file is longer than the slice,
-    # and json says so.
+    found = {}
+    # Backwards, because the newest entry of a kind is the one that counts. A
+    # line that will not decode is passed over: the first line of the slice is
+    # half a line whenever the file is longer than the slice, and the last can
+    # be half of one when the file is being written while it is read.
     for line in reversed(tail.splitlines()):
         try:
             entry = json.loads(line)
@@ -1023,16 +1031,17 @@ def chat_title(transcript) -> str:
             continue
         if not isinstance(entry, dict):
             continue
-        kind = entry.get("type")
-        if kind == "ai-title":
-            title = entry.get("aiTitle")
-            if isinstance(title, str) and title.strip():
-                return one_line(title)
-        elif kind == "last-prompt" and not fallback:
-            typed = entry.get("lastPrompt")
-            if isinstance(typed, str) and typed.strip():
-                fallback = one_line(typed)
-    return fallback
+        for kind, key in TITLE_KINDS:
+            named = entry.get(key)
+            if entry.get("type") == kind and key not in found and isinstance(named, str) and named.strip():
+                found[key] = one_line(named)
+        if "customTitle" in found:
+            # Nothing outranks the name they gave it themselves.
+            break
+    for _, key in TITLE_KINDS:
+        if key in found:
+            return found[key]
+    return ""
 
 
 def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, state=None, at=None, title=""):
