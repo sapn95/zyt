@@ -1057,7 +1057,7 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     memory the chat the person is typing into would be the one thing about them
     nobody knows. `title` is what the chat calls itself, so that a list of them
     names conversations rather than checkouts. `promptAt` is when they last
-    talked to it; a session that has
+    talked to it, to the second, and `promptOrder` the same to the microsecond; a session that has
     only ever worked is no chat and the Spoon skips it. The note also names the
     terminal pane the session was opened in, which is how four chats in four tabs
     are told apart with nobody asked anything."""
@@ -1092,6 +1092,11 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
                 "at": max(now, before.get("at") or 0),
                 "order": max(moment, sequence),
                 "promptAt": max(now if prompt else 0, before.get("promptAt") or 0) or None,
+                # The same second holds a prompt and an answer given to the
+                # Spoon's panel, and which came first decides whether that
+                # answer still stands. The second cannot say, so the moment is
+                # written down as well.
+                "promptOrder": max(moment if prompt else 0, before.get("promptOrder") or 0) or None,
                 # The title follows the prompt and not the event, because a
                 # tool event knows nothing about what the chat is called. A
                 # prompt that waited on git can reach the lock behind a tool
@@ -1152,22 +1157,25 @@ def cmd_hook(args) -> int:
     remote = git_remote(where)
     # One event, one timestamp, however long the git call takes: the Spoon tells
     # the notes of the same prompt apart from an older chat's by comparing them.
-    at = int(time.time())
+    # The fraction is kept, because the Spoon puts a prompt and an answer of the
+    # same second in order by it; the notes that are dated by the second round
+    # it off themselves.
+    moment = time.time()
     # The session's own note knows more than this one event does: the remote it
     # last touched, even when the event itself is a prompt in a folder that is
     # no checkout.
     # Read on a prompt and not on a tool event: the title only moves when the
     # person says something, and a tool event is the common one by far.
     title = chat_title(payload.get("transcript_path")) if prompt else ""
-    note = write_session(args.tool, where, session, prompt, remote=remote, at=at, title=title)
+    note = write_session(args.tool, where, session, prompt, remote=remote, at=moment, title=title)
     if note:
         remote = note["remote"]
-    write_context(args.tool, where, session=session, remote=remote, at=at)
+    write_context(args.tool, where, session=session, remote=remote, at=int(moment))
     # A prompt is the person talking to this chat. Several sessions can be
     # working at once, and only one of them is the one being typed into; the
     # Spoon uses this second note to classify the editor's window.
     if prompt:
-        write_context(args.tool, where, name="chat", session=session, remote=remote, at=at)
+        write_context(args.tool, where, name="chat", session=session, remote=remote, at=int(moment))
     return 0
 
 
