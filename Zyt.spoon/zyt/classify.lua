@@ -174,37 +174,98 @@ function M.chatOf(rules, obs)
   return pick.remote, unsure, candidates
 end
 
+--- The name a chat has given itself, whitespace collapsed, or nil when the note
+--- carries none.
+local function titleOf(chat)
+  local title = type(chat) == "table" and chat.title or nil
+  if type(title) ~= "string" then
+    return nil
+  end
+  title = (title:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+  if title == "" then
+    return nil
+  end
+  return title
+end
+
+--- What one row of a list of chats says: the name the chat has given itself,
+--- with the end cut off at `max` characters. Nil when the note carries no
+--- title, and then the caller falls back to the repository, which is all a note
+--- written before there were titles has.
+function M.chatLabel(chat, max)
+  local title = titleOf(chat)
+  if not title then
+    return nil
+  end
+  max = max or 48
+  local length = utf8.len(title)
+  -- utf8.len says nil on bytes that are no text at all; a byte count is then
+  -- the honest answer, and cutting one short of the limit leaves room for the
+  -- ellipsis either way.
+  if not length then
+    return #title <= max and title or (title:sub(1, max - 1) .. "…")
+  end
+  if length <= max then
+    return title
+  end
+  local cut = title:sub(1, utf8.offset(title, max) - 1)
+  return (cut:gsub("%s+$", "")) .. "…"
+end
+
 --- The chats worth putting to the person when nothing on screen says which one
---- is in front: the newest chat of each repository, newest first, `max` of them
---- at the outside. Two chats in one checkout are one entry, because they carry
---- the same name and the same class and either answer would do.
+--- is in front: one row per chat, newest first, `max` of them at the outside.
+--- Two chats in one checkout that have named themselves are two rows, because
+--- the names are what the person is picking between; two that have not are one,
+--- since two rows carrying the same repository and the same class would be a
+--- choice made blind.
 ---
---- When there are more repositories than `max`, the newest chat of each class
---- keeps its place whatever its age: the question only gets asked because the
---- chats straddle both classes, and a list with one class in it has no answer in
---- it. The rest of the room goes to the newest.
+--- When there are more chats than `max`, the newest of each class is kept
+--- whatever its age: the question only gets asked because the chats straddle
+--- both classes, and a list with one class in it has no answer in it. The rest
+--- of the room goes to the newest. Which rows are kept is one question and what
+--- order they come in is another: the list that comes back is in the order they
+--- were typed into either way, so that nothing older stands above something
+--- newer for having been the only one of its class.
 function M.chatChoices(rules, obs, max)
   local _, _, candidates = M.chatOf(rules, obs)
   local rows, seen = {}, {}
   for _, chat in ipairs(candidates or {}) do
-    if type(chat.session) == "string" and not seen[chat.remote] then
-      seen[chat.remote] = true
-      rows[#rows + 1] = { session = chat.session, remote = chat.remote, class = M.remoteClass(rules, chat.remote) }
+    -- What would be written on the row: its name where it has one, and the
+    -- repository underneath it either way, so that two chats of one name in two
+    -- checkouts stay two rows.
+    local row = (titleOf(chat) or "") .. "\0" .. tostring(chat.remote)
+    if type(chat.session) == "string" and not seen[row] then
+      seen[row] = true
+      rows[#rows + 1] = {
+        session = chat.session,
+        remote = chat.remote,
+        title = chat.title,
+        class = M.remoteClass(rules, chat.remote),
+      }
     end
   end
   if #rows <= max then
     return rows
   end
-  local kept, taken, classes = {}, {}, {}
+  local taken, classes, room = {}, {}, 0
   for index, row in ipairs(rows) do
-    if not classes[row.class] then
+    -- `max` is the room there is, and a class kept past it would be a row the
+    -- panel was never going to draw.
+    if not classes[row.class] and room < max then
       classes[row.class] = true
       taken[index] = true
-      kept[#kept + 1] = row
+      room = room + 1
     end
   end
+  for index in ipairs(rows) do
+    if not taken[index] and room < max then
+      taken[index] = true
+      room = room + 1
+    end
+  end
+  local kept = {}
   for index, row in ipairs(rows) do
-    if not taken[index] and #kept < max then
+    if taken[index] then
       kept[#kept + 1] = row
     end
   end

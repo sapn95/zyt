@@ -70,15 +70,41 @@ the one they turn to while this one works, and that is what makes it rare. It is
 put to somebody who has been reading rather than typing, which is exactly when
 nothing else can tell.
 
-One row per repository, the newest chat of it, and every repository that has a
-class gets a row up to eight of them: a panel that showed three and kept the
-fourth to itself was asking about a chat the person could not pick. Two chats in
-one checkout are one row, because two rows with the same name and the same class
-would be a choice made blind. Past eight the newest chat of each class keeps its
-place whatever its age, since the question is only asked because the chats
-straddle both classes and a list with one class in it has no answer in it. The
+One row per chat, up to eight of them, and every chat whose repository has a
+class gets one: a panel that showed three and kept the fourth to itself was
+asking about a chat the person could not pick. Two chats in
+one checkout are two rows once they have named themselves, since the names are
+what is being picked between; two that have not named themselves are one row,
+because two rows carrying the same repository and the same class would be a
+choice made blind. Past eight the newest chat of each class is kept whatever its
+age, since the question is only asked because the chats straddle both classes
+and a list with one class in it has no answer in it. What is kept is one
+question and the order is another: the rows stand in the order they were typed
+into, so nothing older sits above something newer for having been the only one
+of its class. The
 last row is Later, which answers nothing and takes the panel away, and it is
 there because nothing else does any more.
+
+A row names the conversation, not the checkout. The first list said the
+repository, because that is where the class comes from and the panel had
+nothing else to go on, and it read as a list of checkouts: not how anybody
+remembers which chat is which, and two chats in one repository were two
+identical rows. The note carries the name the chat has given itself now. Claude
+Code keeps an `ai-title` entry in the session transcript and rewrites it as the
+conversation moves on, which is the title the person reads in their own list of
+chats, so the hook takes the end of that file on every prompt and keeps what it
+finds. A chat too young to have been named offers the last thing typed into it,
+which says as much, and a note from before any of this still has its repository
+to fall back on. The colour goes on saying work or private, so dropping the name
+of the checkout costs the row nothing.
+
+The question goes when the window it is about does. A panel about the chats of
+one editor cannot change what is being recorded while another application is in
+front, nothing is keeping its list current there, and a chat it names may have
+ended in the meantime: a list like that is a question about an afternoon that
+has moved on. So it is taken down as soon as the application it is about is no
+longer in front, and the cooldown stays where it is. Somebody who saw the
+question and went somewhere else has said Later without having to click it.
 
 A panel that is waiting has its list rebuilt on every tick, whether anybody is
 at the keyboard or not. A chat that has closed drops out of it, one opened since

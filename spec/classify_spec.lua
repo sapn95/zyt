@@ -315,6 +315,37 @@ describe("classify.decide", function()
   end)
 end)
 
+describe("classify.chatLabel", function()
+  it("says the name the chat gave itself, on one line", function()
+    assert.equal("Arbeitszit timetracke", classify.chatLabel({ title = "  Arbeitszit\n  timetracke " }, 44))
+  end)
+
+  it("has nothing to say about a note from before there were titles", function()
+    assert.is_nil(classify.chatLabel({ remote = "git@github.com:me/budget.git" }, 44))
+    assert.is_nil(classify.chatLabel({ title = "   " }, 44))
+    assert.is_nil(classify.chatLabel({ title = 42 }, 44))
+    assert.is_nil(classify.chatLabel(nil, 44))
+  end)
+
+  it("cuts a long one to the width of a row", function()
+    local label = classify.chatLabel({ title = string.rep("a", 80) }, 10)
+    assert.equal(string.rep("a", 9) .. "…", label)
+    assert.equal(10, utf8.len(label))
+    -- a title that fits is left alone, ellipsis and all
+    assert.equal("exactly 10", classify.chatLabel({ title = "exactly 10" }, 10))
+  end)
+
+  it("cuts between characters and not through one", function()
+    -- Cutting by bytes would leave half of an ä behind, and half a character is
+    -- not a character: utf8.len says nil about the result.
+    local label = classify.chatLabel({ title = string.rep("ä", 40) }, 10)
+    assert.equal(10, utf8.len(label))
+    assert.equal(string.rep("ä", 9) .. "…", label)
+    -- the space before a cut goes with it, so no row ends in a gap
+    assert.equal("one two…", classify.chatLabel({ title = "one two three" }, 8))
+  end)
+end)
+
 describe("classify.chatChoices", function()
   local infra = "ssh://git@git.example.com:7999/team/infra.git"
   local budget = "git@github.com:me/budget.git"
@@ -323,11 +354,39 @@ describe("classify.chatChoices", function()
     return { age = 60, promptAt = 100, session = session, remote = remote, bundle = "b" }
   end
 
+  it("carries the title the note has, for the row to say", function()
+    local one = chat("a", infra)
+    one.title = "The filer chargeback numbers"
+    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, chat("c", budget) } }, 8)
+    assert.equal("The filer chargeback numbers", rows[1].title)
+    assert.is_nil(rows[2].title)
+  end)
+
   it("offers each repository once, in the order they were typed into", function()
     local chats = { chat("a", infra), chat("b", infra), chat("c", budget) }
     local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 8)
     assert.equal(2, #rows)
     assert.same({ "a", "c" }, { rows[1].session, rows[2].session })
+    assert.same({ "work", "private" }, { rows[1].class, rows[2].class })
+  end)
+
+  it("offers two chats of one repository once they have names of their own", function()
+    local one, two = chat("a", infra), chat("b", infra)
+    one.title, two.title = "The chargeback numbers", "The migration runbooks"
+    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, two, chat("c", budget) } }, 8)
+    -- two conversations in one checkout are two things to pick between as soon
+    -- as the rows can tell them apart; without names they are one row still
+    assert.equal(3, #rows)
+    assert.same({ "a", "b", "c" }, { rows[1].session, rows[2].session, rows[3].session })
+    one.title, two.title = nil, nil
+    assert.equal(2, #classify.chatChoices(R, { bundle = "b", chats = { one, two, chat("c", budget) } }, 8))
+  end)
+
+  it("keeps one name in two checkouts apart", function()
+    local one, two = chat("a", infra), chat("b", budget)
+    one.title, two.title = "Fix the pipeline", "Fix the pipeline"
+    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, two } }, 8)
+    assert.equal(2, #rows)
     assert.same({ "work", "private" }, { rows[1].class, rows[2].class })
   end)
 
@@ -346,10 +405,15 @@ describe("classify.chatChoices", function()
     end
     chats[#chats + 1] = chat("p", budget)
     local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 3)
-    -- the newest of each class, and then whatever room is left, newest first:
-    -- a list of five work repositories would be a question with no answer in it
+    -- the newest of each class is kept, and then whatever room is left goes to
+    -- the newest: a list of five work repositories would be a question with no
+    -- answer in it. What is kept is one question, the order is another, and the
+    -- rows come back in the order they were typed into
     assert.equal(3, #rows)
-    assert.same({ "w1", "p", "w2" }, { rows[1].session, rows[2].session, rows[3].session })
+    assert.same({ "w1", "w2", "p" }, { rows[1].session, rows[2].session, rows[3].session })
+    assert.same({ "work", "work", "private" }, { rows[1].class, rows[2].class, rows[3].class })
+    -- and room for one is one row, rather than one of each class
+    assert.equal(1, #classify.chatChoices(R, { bundle = "b", chats = chats }, 1))
   end)
 end)
 
