@@ -612,6 +612,32 @@ class Hook(unittest.TestCase):
             # the newest title wins, and it arrives as one line
             self.assertEqual(zyt.chat_title(str(transcript)), "The filer chargeback numbers")
 
+    def test_a_name_typed_in_by_hand_outranks_the_one_the_tool_made_up(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    json.dumps(entry)
+                    for entry in (
+                        {"type": "custom-title", "customTitle": "massy-ux"},
+                        {"type": "ai-title", "aiTitle": "Whatever it is about"},
+                        {"type": "last-prompt", "lastPrompt": "and then"},
+                    )
+                )
+                + "\n"
+            )
+            # the tool goes on titling a conversation that has been renamed, and
+            # the name in the person's own list is still the one they typed
+            self.assertEqual(zyt.chat_title(str(transcript)), "massy-ux")
+
+    def test_a_line_that_was_half_written_is_passed_over(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            transcript = Path(tmp) / "session.jsonl"
+            transcript.write_text(
+                json.dumps({"type": "ai-title", "aiTitle": "Whole"}) + "\n" + '{"type":"ai-title","aiTitle":"Half of'
+            )
+            self.assertEqual(zyt.chat_title(str(transcript)), "Whole")
+
     def test_a_transcript_with_no_title_yet_offers_the_last_prompt(self):
         with tempfile.TemporaryDirectory() as tmp:
             transcript = Path(tmp) / "session.jsonl"

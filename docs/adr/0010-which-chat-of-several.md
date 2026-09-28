@@ -89,11 +89,13 @@ A row names the conversation, not the checkout. The first list said the
 repository, because that is where the class comes from and the panel had
 nothing else to go on, and it read as a list of checkouts: not how anybody
 remembers which chat is which, and two chats in one repository were two
-identical rows. The note carries the name the chat has given itself now. Claude
-Code keeps an `ai-title` entry in the session transcript and rewrites it as the
-conversation moves on, which is the title the person reads in their own list of
-chats, so the hook takes the end of that file on every prompt and keeps what it
-finds. A chat too young to have been named offers the last thing typed into it,
+identical rows. The note carries the name the chat goes by now. Claude Code
+keeps a `custom-title` entry in the session transcript for a chat that has been
+renamed by hand and an `ai-title` entry otherwise, rewriting the latter as the
+conversation moves on, and one of those is the title the person reads in their
+own list of chats. A name they typed in themselves comes first, whatever the
+tool has called the conversation since. The hook takes the end of that file on
+every prompt and keeps what it finds. A chat too young to have been named offers the last thing typed into it,
 which says as much, and a note from before any of this still has its repository
 to fall back on.
 
@@ -104,8 +106,12 @@ was next spoken to, which is exactly the chat the question is about. So a note
 without a title sends the Spoon to the transcript itself: the file is found by
 session id under the tool's own directory, since the directory is named after
 where the session started and not where it went, and the end of it is read the
-same way. What it finds is kept for five minutes, because a name moves with the
-conversation it is about. The hook writing the title at the prompt is what keeps
+same way. More than one line of each kind is worth trying, because the newest
+can be half of one: the file is appended to while it is read, and a slice taken
+from the end of a long one starts in the middle of a line. Which half is which
+is for the decoder to say rather than for a pattern to guess at, and the line
+before it is the answer either way. What it finds is kept for five minutes,
+because a name moves with the conversation it is about. The hook writing the title at the prompt is what keeps
 that from having to happen at all, and a note too old to be a live chat is not
 worth a file to read. The colour goes on saying work or private, so dropping the name
 of the checkout costs the row nothing.
