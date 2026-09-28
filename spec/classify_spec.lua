@@ -216,6 +216,32 @@ describe("classify.decide", function()
       assert.same({ "work", "chat" }, { decide(obs) })
     end)
 
+    it("takes the word of somebody who has been asked whose time it is", function()
+      local chats = {
+        { age = 300, promptAt = 400, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
+        {
+          age = 900,
+          promptAt = 100,
+          session = "c",
+          remote = "ssh://git@git.example.com:7999/team/infra.git",
+          bundle = "b",
+        },
+      }
+      local obs = { app = "Code", bundle = "b", title = "git", chats = chats, resolve = resolve }
+      -- without an answer the newest chat decides and the question is open
+      assert.same({ "private", "chat", true }, { decide(obs) })
+      -- with one, that is the class, and there is nothing left to ask
+      obs.said = "work"
+      assert.same({ "work", "said" }, { decide(obs) })
+      -- a class nobody could have named is no answer
+      obs.said = "sometimes"
+      assert.same({ "private", "chat", true }, { decide(obs) })
+      -- and it only speaks where nothing else can: one chat, no question
+      obs.said = "work"
+      obs.chats = { chats[1] }
+      assert.same({ "private", "chat" }, { decide(obs) })
+    end)
+
     it("takes the chat in the pane the terminal says is in front", function()
       local work = {
         age = 60,
