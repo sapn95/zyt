@@ -92,7 +92,8 @@ can leave the same note with `zyt context <name> <directory>`.
 Each session gets a note of its own, so several chats in one editor can be told
 apart. When they are all in repositories of the same class, that is the class,
 whichever panel you are reading. When they straddle both, zyt asks which chat
-you are in, one row per chat, named the way your own chat list names them:
+you are in, one row per chat, named the way your own chat list names them, read
+out of the transcript for the chats you have not typed into lately:
 nothing on screen can say, because the editor does not expose its panels. Typing
 into one of them does say it, so for two minutes after a prompt nothing is
 asked, and a panel already up goes away. So does one about an editor you have

@@ -95,7 +95,19 @@ conversation moves on, which is the title the person reads in their own list of
 chats, so the hook takes the end of that file on every prompt and keeps what it
 finds. A chat too young to have been named offers the last thing typed into it,
 which says as much, and a note from before any of this still has its repository
-to fall back on. The colour goes on saying work or private, so dropping the name
+to fall back on.
+
+The note is not the only way to that name, because a note only changes when
+somebody types. A chat that has been read for an hour, or one whose note was
+written before any of this existed, would sit in the list as a checkout until it
+was next spoken to, which is exactly the chat the question is about. So a note
+without a title sends the Spoon to the transcript itself: the file is found by
+session id under the tool's own directory, since the directory is named after
+where the session started and not where it went, and the end of it is read the
+same way. What it finds is kept for five minutes, because a name moves with the
+conversation it is about. The hook writing the title at the prompt is what keeps
+that from having to happen at all, and a note too old to be a live chat is not
+worth a file to read. The colour goes on saying work or private, so dropping the name
 of the checkout costs the row nothing.
 
 The question goes when the window it is about does. A panel about the chats of
