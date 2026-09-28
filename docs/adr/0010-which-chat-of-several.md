@@ -1,7 +1,7 @@
 # 0010 — Which chat, out of the several open in one editor
 
-**Status:** accepted, 2026-09-20; amended 2026-09-24, the chats are a list with a
-row for every repository they are in, up to eight.
+**Status:** accepted, 2026-09-20; amended 2026-09-28, the panel asks whose time
+it is and the chats are listed in the menu.
 
 ## The problem
 
@@ -53,93 +53,86 @@ work whichever one is being read.
 **Disagreement is a question, not a guess** — where nothing can know which panel
 is in front. A terminal does know, and
 [ADR 0012](0012-the-pane-in-front-is-the-chat.md) asks it, so what follows is
-about the editors that do not. When the live chats straddle both
-classes the panel from [ADR 0009](0009-ask-once-and-remember.md) opens with the
-repositories listed in it — `sapn95/zyt` or `sapn95/budget`, not Work or
-Private, because the class is already known for each and the open question is
-which of them the person is in. The owner is part of the name, since the same
-name under two owners is one of the reasons to be asked in the first place.
+about the editors that do not. When the live chats straddle both classes the
+panel from [ADR 0009](0009-ask-once-and-remember.md) opens and asks whose time
+it is: Work, Private, Later. Two rows and the way out.
+
+Listing the chats instead was tried first, and the reasoning was sound enough on
+paper: the class of each is already known, so the only open question is which of
+them is being read, and naming one settles it without the person having to think
+about classes at all. In practice it asks them to do the classifying. A list of
+conversations has to be read, and then mapped onto work and private in the head,
+several times an afternoon, and the rows were repository names at first, which
+is not how anybody remembers which chat is which. The question the tracker needs
+answered is whose time this is, and that is the question to put. The count of
+open chats goes in the line above the rows, because that is the whole reason it
+is being asked.
+
+The answer is about this hour, not about any of the chats, and it is kept in
+memory. A prompt landing in one of that application's chats drops it: typing
+says where they are more plainly than an answer given a while ago, and the chat
+typed into is what the class comes from again. An unlock drops it too, for the
+same reason a pin does not survive one. A question that was answered gives its
+cooldown back, so the next time nothing can tell, it is asked again rather than
+guessed at for half an hour; Later is what spends the cooldown, and that is what
+Later is for.
 
 Typing is an answer, and it comes first. A prompt sent within `typingSeconds`
 (two minutes) says which chat the person is in more plainly than a click on a
 panel could, and it is newer than any answer they could give one, so while it is
-that fresh nothing is asked and a panel already standing goes away. The cooldown
-stays where it is when a panel goes like that: the question was answered, not
-missed. It wears off because the reason the question exists is the other chat,
-the one they turn to while this one works, and that is what makes it rare. It is
-put to somebody who has been reading rather than typing, which is exactly when
-nothing else can tell.
+that fresh nothing is asked and a panel already standing goes away. It wears off
+because the reason the question exists is the other chat, the one they turn to
+while this one works, and that is what makes it rare. It is put to somebody who
+has been reading rather than typing, which is exactly when nothing else can tell.
 
-One row per chat, up to eight of them, and every chat whose repository has a
-class gets one: a panel that showed three and kept the fourth to itself was
-asking about a chat the person could not pick. Two chats in
-one checkout are two rows once they have named themselves, since the names are
-what is being picked between; two that have not named themselves are one row,
-because two rows carrying the same repository and the same class would be a
-choice made blind. Past eight the newest chat of each class is kept whatever its
-age, since the question is only asked because the chats straddle both classes
-and a list with one class in it has no answer in it. What is kept is one
-question and the order is another: the rows stand in the order they were typed
-into, so nothing older sits above something newer for having been the only one
-of its class. The
-last row is Later, which answers nothing and takes the panel away, and it is
-there because nothing else does any more.
+**The chats are in the menu**, one row each, for naming one by hand when that is
+what the person wants: the class of the named chat then decides and no panel is
+involved. One row per chat, up to eight of them, and every chat whose repository
+has a class gets one. Two chats in one checkout are two rows once they have named
+themselves, since the names are what is being picked between; two that have not
+named themselves are one row, because two rows carrying the same repository and
+the same class would be a choice made blind. Past eight the newest chat of each
+class is kept whatever its age, since a list with one class in it has nothing to
+pick between. What is kept is one question and the order is another: the rows
+stand in the order they were typed into, so nothing older sits above something
+newer for having been the only one of its class.
 
-A row names the conversation, not the checkout. The first list said the
-repository, because that is where the class comes from and the panel had
-nothing else to go on, and it read as a list of checkouts: not how anybody
-remembers which chat is which, and two chats in one repository were two
-identical rows. The note carries the name the chat goes by now. Claude Code
-keeps a `custom-title` entry in the session transcript for a chat that has been
-renamed by hand and an `ai-title` entry otherwise, rewriting the latter as the
-conversation moves on, and one of those is the title the person reads in their
-own list of chats. A name they typed in themselves comes first, whatever the
-tool has called the conversation since. The hook takes the end of that file on
-every prompt and keeps what it finds. A chat too young to have been named offers the last thing typed into it,
-which says as much, and a note from before any of this still has its repository
-to fall back on.
+A row names the conversation, not the checkout. It said the repository at first,
+because that is where the class comes from and there was nothing else to go on,
+and it read as a list of checkouts. The note carries the name the chat goes by
+now. Claude Code keeps a `custom-title` entry in the session transcript for a
+chat that has been renamed by hand and an `ai-title` entry otherwise, rewriting
+the latter as the conversation moves on, and one of those is the title the person
+reads in their own list of chats. A name they typed in themselves comes first,
+whatever the tool has called the conversation since. The hook takes the end of
+that file on every prompt and keeps what it finds. A chat too young to have been
+named offers the last thing typed into it, which says as much, and a note from
+before any of this still has its repository to fall back on.
 
 The note is not the only way to that name, because a note only changes when
 somebody types. A chat that has been read for an hour, or one whose note was
 written before any of this existed, would sit in the list as a checkout until it
-was next spoken to, which is exactly the chat the question is about. So a note
-without a title sends the Spoon to the transcript itself: the file is found by
-session id under the tool's own directory, since the directory is named after
-where the session started and not where it went, and the end of it is read the
-same way. More than one line of each kind is worth trying, because the newest
-can be half of one: the file is appended to while it is read, and a slice taken
-from the end of a long one starts in the middle of a line. Which half is which
-is for the decoder to say rather than for a pattern to guess at, and the line
-before it is the answer either way. What it finds is kept for five minutes,
-because a name moves with the conversation it is about. A quarter of a megabyte
-of the end is enough of it: the tool rewrites the name on every exchange, and
-over the transcripts on this machine that carry a name somebody typed in, the
-newest of them was 28.9 KB from the end at the worst, in a file of 37 MB. The hook writing the title at the prompt is what keeps
-that from having to happen at all, and a note too old to be a live chat is not
-worth a file to read. The colour goes on saying work or private, so dropping the name
-of the checkout costs the row nothing.
+was next spoken to. So a note without a title sends the Spoon to the transcript
+itself: the file is found by session id under the tool's own directory, since the
+directory is named after where the session started and not where it went, and the
+end of it is read the same way. More than one line of each kind is worth trying,
+because the newest can be half of one: the file is appended to while it is read,
+and a slice taken from the end of a long one starts in the middle of a line.
+Which half is which is for the decoder to say rather than for a pattern to guess
+at, and the line before it is the answer either way. What it finds is kept for
+five minutes, because a name moves with the conversation it is about. A quarter
+of a megabyte of the end is enough of it: the tool rewrites the name on every
+exchange, and over the transcripts on this machine that carry a name somebody
+typed in, the newest of them was 28.9 KB from the end at the worst, in a file of
+37 MB. The hook writing the title at the prompt is what keeps that from having to
+happen at all, and a note too old to be a live chat is not worth a file to read.
 
-The question goes when the window it is about does. A panel about the chats of
-one editor cannot change what is being recorded while another application is in
-front, nothing is keeping its list current there, and a chat it names may have
-ended in the meantime: a list like that is a question about an afternoon that
-has moved on. So it is taken down as soon as the application it is about is no
-longer in front, and the cooldown stays where it is. Somebody who saw the
-question and went somewhere else has said Later without having to click it.
-
-A panel that is waiting has its list rebuilt on every tick, whether anybody is
-at the keyboard or not. A chat that has closed drops out of it, one opened since
-comes into it, and once the chats stop disagreeing the panel goes on its own. The
-cooldown and the wait for somebody to be there are what it takes to ask a
-question, not what it takes to keep one honest while it stands.
-
-The answer holds for that application until they type into another chat, which
-says where they are more plainly than a click. It is kept in memory and not
-written down: it is an answer about this afternoon, not a rule about a
-repository. The same list is in the menu, so the chat can be named without
-waiting to be asked. Until it is answered, the class is still the
-chat last typed into, and the tracker keeps running rather than stopping on a
-question ([ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)).
+A chat named from the menu holds for that application until they type into
+another one, the same as an answer given to the panel, and for the same reason.
+Neither is written down: both are answers about this afternoon, not rules about
+a repository. Until there is one, the class is still the chat last typed into,
+and the tracker keeps running rather than stopping on a question
+([ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)).
 
 ## What was rejected
 

@@ -340,6 +340,16 @@ local function byTitle(rules, title)
   return nil
 end
 
+--- A class a person could have named. The rules carry the list; a rules table
+--- from before they did is taken at its word for the two there have always
+--- been.
+local function isClass(rules, class)
+  if rules.CLASSES then
+    return rules.CLASSES[class] == true
+  end
+  return class == "work" or class == "private"
+end
+
 --- Decide for one observation:
 ---   obs.app      the frontmost application's name
 ---   obs.bundle   its bundle id, matched against the one a tool's note names
@@ -350,6 +360,7 @@ end
 ---   obs.signal   { age = seconds, remote = url, bundle = id } left behind by a tool's hook
 ---   obs.chats    the same per chat session, plus promptAt, session and pane, newest prompt first
 ---   obs.chosen   the session id the person named as the chat they are in
+---   obs.said     the class they named when asked whose time this is
 ---   obs.resolve  function(path) -> remote url or nil
 --- Returns class, source, unsure — or nil when nothing here has an opinion.
 --- `unsure` means the class is right for one of the chats open here and the
@@ -373,6 +384,13 @@ function M.decide(rules, obs)
   end
   if byApp == "repo" then
     local class, source, unsure = byRepository(rules, obs)
+    -- Asked and answered. Several chats of different classes are open and
+    -- nothing on screen says which one is being read, so the person said whose
+    -- time it is. That is an answer about now, not about any of the chats, and
+    -- it holds until something newer than it says otherwise.
+    if unsure and isClass(rules, obs.said) then
+      return obs.said, "said"
+    end
     if class then
       return class, source, unsure
     end

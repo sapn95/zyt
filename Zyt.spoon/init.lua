@@ -80,6 +80,11 @@ obj.asleep = false
 --- it. In memory only: it is an answer about this afternoon, not a rule.
 obj.chosen = {}
 
+--- Per application, the class the person named when they were asked whose time
+--- it was, and when they named it. In memory only, and dropped as soon as
+--- anything newer says where they are: it is an answer about this hour.
+obj.said = {}
+
 --- Per session, the name its transcript gave it and where that file is. In
 --- memory only, and reread from time to time: a name moves with the
 --- conversation it is about.
@@ -425,6 +430,7 @@ function obj:chats()
           out[#out + 1] = {
             age = now - decoded.promptAt,
             promptAt = decoded.promptAt,
+            promptOrder = decoded.promptOrder,
             remote = decoded.remote,
             -- The note first, since the hook wrote it at the prompt and it
             -- costs nothing; the transcript for the chats that have not been
@@ -479,7 +485,7 @@ function obj:observe(now)
     return { class = self.override, source = "manual", app = app }
   end
   local class, source, unsure = classify.decide(self.rules, obs)
-  self:askWhich(now, obs, unsure)
+  self:askWhose(now, obs, unsure)
   if not class then
     class, source = self:recall(now, obs, key, remote)
   end
@@ -504,6 +510,7 @@ function obj:look(app, title, bundle, idle, signal)
     signal = signal,
     chats = chats,
     chosen = self:stillChosen(bundle, chats),
+    said = self:stillSaid(bundle, chats),
     resolve = self.resolve,
   }
   local key, remote = self:about(obs)
@@ -543,6 +550,14 @@ local function isChatKey(key)
   return type(key) == "string" and key:sub(1, #CHAT_PREFIX) == CHAT_PREFIX
 end
 
+--- When a prompt was sent, as closely as the note can say. The second a prompt
+--- and an answer share cannot put them in order, and which came first is what
+--- decides whether the answer still stands. A note from before the hook wrote
+--- the moment has its second and nothing better.
+local function promptMoment(chat)
+  return chat.promptOrder or chat.promptAt or 0
+end
+
 --- The chat the person named for this application, while that choice still
 --- stands. Typing into another one of them replaces it: they have said where
 --- they are by saying something there. Only the chats of this application can
@@ -555,12 +570,45 @@ function obj:stillChosen(bundle, chats)
     return nil
   end
   for _, chat in ipairs(chats) do
-    if chat.bundle == bundle and chat.session ~= choice.session and (chat.promptAt or 0) > choice.at then
+    if chat.bundle == bundle and chat.session ~= choice.session and promptMoment(chat) > choice.at then
       self.chosen[at] = nil
       return nil
     end
   end
   return choice.session
+end
+
+--- The class the person named for this application, while that answer still
+--- stands. A prompt in one of its chats replaces it: typing says where they are
+--- more plainly than an answer given a while ago, and the chat typed into is
+--- what the class comes from again.
+function obj:stillSaid(bundle, chats)
+  local at = bundle or ""
+  local answer = self.said[at]
+  if not answer then
+    return nil
+  end
+  for _, chat in ipairs(chats) do
+    if chat.bundle == bundle and promptMoment(chat) > answer.at then
+      self.said[at] = nil
+      return nil
+    end
+  end
+  return answer.class
+end
+
+--- Zyt:say(bundle, class)
+--- Method
+--- Take the person's word for whose time this is, for as long as nothing newer
+--- says otherwise. Not written down: the same editor is work in one hour and
+--- private in the next, which is why the question comes back at all.
+function obj:say(bundle, class)
+  self.said[bundle or ""] = { class = class, at = hs.timer.secondsSinceEpoch() }
+  -- A question that was answered has not been spent. It is asked again as soon
+  -- as nothing can tell whose time it is, which is the whole of the bargain.
+  self.asked[chatKey(bundle)] = nil
+  self:dismiss()
+  self:tick()
 end
 
 --- Zyt:choose(bundle, session)
@@ -569,7 +617,7 @@ end
 --- are in. Nothing on screen can say: the editor's accessibility tree does not
 --- expose its panels.
 function obj:choose(bundle, session)
-  self.chosen[bundle or ""] = { session = session, at = os.time() }
+  self.chosen[bundle or ""] = { session = session, at = hs.timer.secondsSinceEpoch() }
   self:dismiss()
   self:tick()
 end
@@ -601,31 +649,32 @@ function obj:recall(now, obs, key, remote)
   return nil
 end
 
---- Two chats are open in this application, one work and one private, and
---- nothing on screen says which panel is in front. Ask, with the repositories
---- as the list, at most once per cooldown and only while somebody is there to
---- answer. Until they do, the class is the chat they last typed into.
+--- Several chats are open in this application, they are not all of one class,
+--- and nothing on screen says which of them is being read. The question put to
+--- the person is not which chat that is: the answer to that is a list of
+--- conversations to read at a glance, and it asks them to do the classifying.
+--- It is the question zyt needs answered, whose time this is, and the answer
+--- holds until something newer says otherwise.
 ---
 --- Called on every tick, whether the question is open or not: `unsure` says it
 --- is, and the panel belongs to this method either way.
-function obj:askWhich(now, obs, unsure)
-  -- Keyed the way the named chat itself is, by the application hosting it, so
-  -- that forgetting one answer clears both.
+function obj:askWhose(now, obs, unsure)
+  -- Keyed the way the answer itself is, by the application hosting the chats,
+  -- so that forgetting one clears both.
   local key = chatKey(obs.bundle)
   local standing = self.prompt ~= nil and self.prompt.about == key
   -- A question about the chats of one application is a question about the
   -- window in front. With another application there it cannot change what is
-  -- being recorded, nothing is keeping its list current, and a chat it names
-  -- may have ended while it stood: it goes, and the cooldown stays, because a
-  -- question somebody saw and walked away from is the Later row by other means.
+  -- being recorded, and a chat it was about may have ended while it stood: it
+  -- goes, and the cooldown stays, because a question somebody saw and walked
+  -- away from is the Later row by other means.
   if not standing and self.prompt and isChatKey(self.prompt.about) then
     self:dismiss()
   end
   if not unsure then
     -- The question has stopped being one. Somebody typed into one of the chats,
-    -- or the terminal named the pane in front, and a panel left standing is
-    -- asking for an answer that has been given. The cooldown stays where it is:
-    -- this one was answered, unlike a panel nobody ever saw.
+    -- named a pane or answered it, and a panel left standing is asking for an
+    -- answer that has been given.
     if standing then
       self:dismiss()
     end
@@ -636,9 +685,7 @@ function obj:askWhich(now, obs, unsure)
   end
   -- A panel standing for this question is kept current, and neither gate below
   -- holds it back. Somebody at the keyboard and a cooldown are what it takes to
-  -- ask; keeping a list honest while it waits takes nothing, and a chat that
-  -- closed while the person was away would otherwise still be in it, offering a
-  -- session that ended.
+  -- ask; keeping one honest while it waits takes nothing.
   if not standing then
     if not idleIsShort(obs.idle) then
       return
@@ -647,32 +694,22 @@ function obj:askWhich(now, obs, unsure)
       return
     end
   end
-  local choices = {}
-  for _, chat in ipairs(classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)) do
-    -- The name the chat gave itself, because that is what the person is looking
-    -- at while they read it. A repository is what decides the class, and the
-    -- colour already says which one that came out as.
-    local label = classify.chatLabel(chat, CHAT_LABEL_CHARS) or repoLabel(chat.remote)
-    choices[#choices + 1] = { id = chat.session, label = label, colour = COLOURS[chat.class], class = chat.class }
-  end
-  if #choices < 2 then
-    -- The chats stopped disagreeing, so there is nothing left to pick between
-    -- and the panel is asking about an afternoon that has moved on.
-    if standing then
-      self:dismiss()
-    end
-    return
-  end
-  -- The panel waits for an answer now, so the way out of a question asked at a
-  -- bad moment has to be in the list. The cooldown counts from here either way.
-  choices[#choices + 1] = { id = LATER, label = "Later", colour = COLOURS.other }
-  local shown = self:ask("which chat are you in?", obs.app, choices, function(id)
+  -- How many chats disagree is why this is being asked, and saying so is what
+  -- tells this panel apart from the one about a repository nobody knows.
+  local open = #classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)
+  local shown = self:ask("whose time is this?", ("%s · %d chats"):format(obs.app or "?", open), {
+    { id = "work", label = "Work", colour = COLOURS.work },
+    { id = "private", label = "Private", colour = COLOURS.private },
+    { id = LATER, label = "Later", colour = COLOURS.other },
+  }, function(id)
     if id == LATER then
       self:dismiss()
     else
-      self:choose(obs.bundle, id)
+      self:say(obs.bundle, id)
     end
   end, key)
+  -- The cooldown counts from a question somebody saw, and Later is what spends
+  -- it. An answer gives it back, in `say`.
   if shown then
     self.asked[key] = now
   end
@@ -709,12 +746,14 @@ function obj:forget(key, bundle)
     self.learned[key] = nil
     self.asked[key] = nil
     self.chosen[bundle or ""] = nil
+    self.said[bundle or ""] = nil
     self.asked[chatKey(bundle)] = nil
     self:saveLearned()
   else
     self.learned = {}
     self.asked = {}
     self.chosen = {}
+    self.said = {}
     os.remove(self.statePath .. "/learned.json")
   end
   self:tick()
@@ -1168,6 +1207,7 @@ function obj:watch()
     elseif event == W.screensDidUnlock or event == W.sessionDidBecomeActive then
       self.locked = false
       self.override = nil
+      self.said = {}
       self:tick()
     elseif event == W.systemWillSleep then
       self.asleep = true

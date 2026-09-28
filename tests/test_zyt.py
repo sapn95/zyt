@@ -1,5 +1,6 @@
 """The report's arithmetic, and the note the hook leaves behind."""
 
+import argparse
 import datetime as dt
 import importlib.machinery
 import importlib.util
@@ -696,6 +697,40 @@ class Hook(unittest.TestCase):
                 "claude-code", tmp, "abc", True, remote=None, state=state, title="A newer name", at=1500
             )
             self.assertEqual((late["promptAt"], late["title"]), (1500, "A newer name"))
+
+    def test_a_prompt_is_dated_to_the_microsecond_as_well(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            note = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, at=1000.25)
+            # the second is what everything is dated by; the moment is there so
+            # that a prompt and an answer of the same second can be put in order
+            self.assertEqual((note["promptAt"], note["promptOrder"]), (1000, 1000.25))
+            worked = zyt.write_session("claude-code", tmp, "abc", False, remote=None, state=state, at=1001.5)
+            self.assertEqual(worked["promptOrder"], 1000.25)
+            later = zyt.write_session("claude-code", tmp, "abc", True, remote=None, state=state, at=1002.75)
+            self.assertEqual(later["promptOrder"], 1002.75)
+
+    def test_the_hook_keeps_the_fraction_of_the_second(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "state"
+            payload = {"hook_event_name": "UserPromptSubmit", "session_id": "abc", "cwd": tmp}
+            stdin, stdout = zyt.sys.stdin, zyt.sys.stdout
+            was = zyt.STATE
+            zyt.STATE = state
+            try:
+                zyt.sys.stdin = io.StringIO(json.dumps(payload))
+                zyt.sys.stdout = io.StringIO()
+                with mock.patch.object(zyt.time, "time", return_value=1000.25):
+                    zyt.cmd_hook(argparse.Namespace(tool="claude-code"))
+            finally:
+                zyt.sys.stdin, zyt.sys.stdout = stdin, stdout
+                zyt.STATE = was
+            note = json.loads((state / "sessions" / "abc.json").read_text())
+            # the second is what the notes are dated by, and the moment is what
+            # puts a prompt and an answer of that second in order. The fraction
+            # has to survive the hook, which had rounded it off before it began.
+            self.assertEqual((note["promptAt"], note["promptOrder"]), (1000, 1000.25))
+            self.assertEqual(json.loads((state / "chat.json").read_text())["at"], 1000)
 
     def test_a_session_that_has_only_worked_is_no_chat(self):
         with tempfile.TemporaryDirectory() as tmp:
