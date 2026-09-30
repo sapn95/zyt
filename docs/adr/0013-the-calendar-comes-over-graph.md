@@ -56,6 +56,31 @@ machine could read it for as long as that call takes. The alternative was a file
 in the state directory, readable for as long as it exists. Neither is perfect
 and the shorter window won.
 
+## Filling the gap
+
+A row is written for the stretches of a gap a meeting covered, and a gap is the
+time between the end of the last row and the start of the segment that opened
+when somebody came back. Never into that segment: the minutes after the wake are
+recorded properly, and a meeting that runs past it would otherwise be counted
+twice.
+
+It runs when they come back, on a wake or an unlock, because the gap is over
+then and both its edges stand still. Asking during the gap would mean rows
+that end at "now" and a second row for the rest of the same meeting, and the
+machine is usually asleep anyway.
+
+What counts is a meeting that was not cancelled, is not an all-day marker, does
+not say `free`, and was not declined: a meeting turned down is somebody else's
+hour. The busy statuses that count are a rule, so `tentative` can be left out by
+whoever does not want it. Overlapping and touching stretches are merged, because
+the record holds time and not meetings, and what is left shorter than
+`minimumSeconds` is dropped: a sliver of a meeting at the edge of a gap is not
+an hour anybody worked.
+
+The command line does the asking in a shell of its own, so a round trip to Graph
+never holds up a tick, and the Spoon writes the rows itself. Nothing else writes
+that file.
+
 ## What was rejected
 
 Publishing the calendar as an ICS URL and fetching it. It is a secret URL that

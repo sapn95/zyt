@@ -149,6 +149,13 @@ consented for you alone:
 login keychain. `zyt meetings` prints what it can see, which is the way to check
 that the sign-in and the scope are right.
 
+From then on it fills itself in. When you come back, on a wake or an unlock, the
+Spoon asks what covered the time since the last row and writes what it finds as
+`work`, source `meeting`. It stops at the segment that opened when you came
+back, so nothing is counted twice, it leaves out what you declined, what was
+cancelled, what says `free` and what lasts the whole day, and it merges what
+runs back to back.
+
 ## The week
 
 ```console

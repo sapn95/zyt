@@ -19,6 +19,15 @@ M.defaults = {
   apps = {},
   titles = {},
   prompt = { enabled = true, seconds = 0, cooldownSeconds = 1800 },
+  -- What the calendar is allowed to fill in. The command line holds the rest of
+  -- this block, the tenant and the app it signs in to; nothing here needs them.
+  meetings = {
+    enabled = false,
+    class = "work",
+    statuses = { "busy", "oof", "tentative" },
+    minimumSeconds = 300,
+    lookbackHours = 24,
+  },
 }
 
 -- Zero seconds is the panel waiting for an answer rather than going away by
@@ -96,6 +105,33 @@ function M.normalise(raw, home)
     prompt[key] = value
   end
   rules.prompt = prompt
+
+  if type(rules.meetings) ~= "table" then
+    return fail("meetings has to be a JSON object")
+  end
+  local meetings = {}
+  for key, default in pairs(M.defaults.meetings) do
+    local value = rules.meetings[key]
+    if value == nil then
+      value = default
+    end
+    if type(value) ~= type(default) then
+      return fail("meetings.%s has to be a %s like %s", key, type(default), tostring(default))
+    end
+    if type(value) == "number" and value < 0 then
+      return fail("meetings.%s has to be 0 or more", key)
+    end
+    meetings[key] = value
+  end
+  if not CLASSES[meetings.class] then
+    return fail("meetings.class has to be work or private, not %q", tostring(meetings.class))
+  end
+  for index, status in ipairs(meetings.statuses) do
+    if type(status) ~= "string" or status == "" then
+      return fail("meetings.statuses[%d] has to be a non-empty string", index)
+    end
+  end
+  rules.meetings = meetings
 
   for app, class in pairs(rules.apps) do
     if not (CLASSES[class] or class == "repo") then
