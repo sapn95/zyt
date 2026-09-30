@@ -117,6 +117,38 @@ on, the same as an editor's ([ADR 0012](docs/adr/0012-the-pane-in-front-is-the-c
 }
 ```
 
+## The meetings you were not at a keyboard for
+
+An hour in a meeting room is work, and nothing on the screen says so: the
+notebook is shut, or open and untouched until the idle rule ends the segment at
+the last keystroke. zyt can read the calendar and count that hour.
+
+It reads Microsoft Graph, not Outlook, because Outlook for Mac no longer hands
+its live calendar to AppleScript
+([ADR 0013](docs/adr/0013-the-calendar-comes-over-graph.md)). It asks for the
+start, the end, the all-day flag, the busy status and the answer you gave, and
+for nothing else: no subject, no attendees, no location.
+
+The `meetings` block in the rules file turns it on. It needs an app
+registration of your own, a single-tenant public client with `Calendars.Read`
+consented for you alone:
+
+```json
+"meetings": {
+  "enabled": true,
+  "tenantId": "<your tenant>",
+  "clientId": "<your app>",
+  "class": "work",
+  "statuses": ["busy", "oof", "tentative"],
+  "minimumSeconds": 300,
+  "lookbackHours": 24
+}
+```
+
+`zyt login` signs in once, in the browser, and keeps the refresh token in the
+login keychain. `zyt meetings` prints what it can see, which is the way to check
+that the sign-in and the scope are right.
+
 ## The week
 
 ```console
@@ -219,6 +251,8 @@ says whether it does.
 | `zyt work` · `zyt private` · `zyt auto` | Pin the class, or let the rules decide |
 | `zyt week [2026-W38]` · `zyt day [2026-09-14]` | The record and the proposal, `--json` for a script |
 | `zyt board [2026-W38\|2026-09-14]` | The same, drawn as one HTML file, and opened |
+| `zyt login` | Sign in to Microsoft Graph once, for the calendar |
+| `zyt meetings [--hours 24]` | The events it can see, `--json` for the Spoon |
 | `zyt hook claude-code` | The stdin hook for Claude Code |
 | `zyt context <source> [dir]` | Leave the same note from anything else |
 | `zyt link` · `zyt unlink` | Put the Spoon where Hammerspoon finds it, take it out |
@@ -229,8 +263,10 @@ says whether it does.
 `~/.config/zyt/rules.json` is yours and never in this repository
 ([ADR 0008](docs/adr/0008-the-rules-stay-out-of-the-repository.md)).
 `~/.local/state/zyt/intervals.csv` has one row per segment,
-`start,end,seconds,class,source,app`, and belongs to you too. Nothing leaves
-the machine.
+`start,end,seconds,class,source,app`, and belongs to you too. Nothing about what
+you do leaves the machine. The one thing that goes out is the calendar request,
+when the `meetings` block is on: it asks Microsoft Graph for the times of your
+own events and gets times back.
 
 ## Development
 

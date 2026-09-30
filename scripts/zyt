@@ -12,11 +12,14 @@ Standard library only, and nothing newer than the python3 a Mac ships with.
 from __future__ import annotations
 
 import argparse
+import base64
 import contextlib
 import csv
 import datetime as dt
 import fcntl
+import hashlib
 import html
+import http.server
 import json
 import os
 import re
@@ -24,6 +27,10 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import zoneinfo
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +73,27 @@ REPORT_DEFAULTS = {
     "defaultStart": "08:00",
     "fillEmptyDays": False,
 }
+# The calendar half. Times come back from Graph in UTC and are turned into
+# epoch seconds here, so the Spoon parses nothing. The scopes are what a token
+# is asked for; the app registration decides what it may have.
+MEETING_DEFAULTS = {
+    "enabled": False,
+    "tenantId": None,
+    "clientId": None,
+    "redirectUri": "http://localhost:3000",
+    "class": "work",
+    # What an event has to say about the time it takes. `free` never counts, and
+    # `workingElsewhere` is a day somewhere else rather than a meeting.
+    "statuses": ["busy", "oof", "tentative"],
+    "minimumSeconds": 300,
+    "lookbackHours": 24,
+}
+GRAPH = "https://graph.microsoft.com/v1.0"
+GRAPH_SCOPES = "offline_access Calendars.Read"
+KEYCHAIN_SERVICE = "zyt-graph"
+# How long the one interactive sign-in waits for the browser to come back.
+SIGN_IN_SECONDS = 300
+
 CHUNK_MINUTES = 15
 # How close two recorded segments of one class have to be for the board to draw
 # them as one bar. A tick that flickered between the classes and back leaves a
@@ -95,6 +123,14 @@ def load_rules(path=None) -> dict:
     report = dict(REPORT_DEFAULTS)
     report.update(given)
     rules["report"] = report
+    given = rules.get("meetings")
+    if given is None:
+        given = {}
+    if not isinstance(given, dict):
+        raise SystemExit(f"{path}: meetings has to be a JSON object")
+    meetings = dict(MEETING_DEFAULTS)
+    meetings.update(given)
+    rules["meetings"] = meetings
     return rules
 
 
@@ -1123,6 +1159,266 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     return note
 
 
+# ---------------------------------------------------------------------------
+# The calendar
+
+
+def keychain(account: str, secret=None):
+    """The refresh token, in the login keychain. Reading it is what lets the
+    tracker ask Graph again tomorrow without another sign-in; writing it is the
+    only thing the sign-in leaves behind.
+
+    The token goes to `security` on its command line, where another process on
+    this machine could see it for as long as the call takes. A file in the state
+    directory would be readable for as long as it exists, which is longer."""
+    if secret is None:
+        found = subprocess.run(
+            ["security", "find-generic-password", "-a", account, "-s", KEYCHAIN_SERVICE, "-w"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return found.stdout.strip() if found.returncode == 0 else None
+    subprocess.run(
+        ["security", "add-generic-password", "-U", "-a", account, "-s", KEYCHAIN_SERVICE, "-w", secret],
+        capture_output=True,
+        check=True,
+    )
+    return secret
+
+
+def meeting_settings(rules: dict) -> dict:
+    """The `meetings` block, checked. A tenant and a client id are what turn the
+    calendar on; without them there is nothing to sign in to."""
+    settings = rules["meetings"]
+    if not settings.get("enabled"):
+        raise SystemExit("meetings.enabled is false in the rules file: the calendar is not being read.")
+    for key in ("tenantId", "clientId"):
+        if not settings.get(key):
+            raise SystemExit(f"meetings.{key} is not set in the rules file.")
+    return settings
+
+
+def graph_token(settings: dict) -> str:
+    """An access token for Graph, from the refresh token the sign-in left in the
+    keychain. Access tokens last an hour and are not kept: one round trip per
+    run is cheaper than a stale token on disk."""
+    account = settings["clientId"]
+    refresh = keychain(account)
+    if not refresh:
+        raise SystemExit("no sign-in yet: run `zyt login` once.")
+    answer = _token_request(
+        settings,
+        {
+            "client_id": settings["clientId"],
+            "grant_type": "refresh_token",
+            "refresh_token": refresh,
+            "scope": GRAPH_SCOPES,
+        },
+    )
+    # Entra hands out a new refresh token on every use and expires the old one
+    # after a while. Keeping the newest is what stops the sign-in from lapsing.
+    if answer.get("refresh_token"):
+        keychain(account, answer["refresh_token"])
+    return answer["access_token"]
+
+
+def _token_request(settings: dict, form: dict) -> dict:
+    url = f"https://login.microsoftonline.com/{settings['tenantId']}/oauth2/v2.0/token"
+    data = urllib.parse.urlencode(form).encode()
+    request = urllib.request.Request(url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as answer:
+            return json.loads(answer.read())
+    except urllib.error.HTTPError as error:
+        detail = json.loads(error.read() or b"{}")
+        raise SystemExit(
+            "Entra refused the token: {} {}".format(
+                detail.get("error", error.code), (detail.get("error_description") or "").split(chr(10))[0]
+            )
+        ) from None
+
+
+def sign_in(settings: dict) -> None:
+    """The one interactive sign-in. A public client with no secret proves it
+    asked for the code it is redeeming with PKCE, and the code comes back to a
+    server on this machine, so it never leaves it."""
+    verifier = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    state = base64.urlsafe_b64encode(os.urandom(16)).rstrip(b"=").decode()
+    redirect = settings["redirectUri"]
+    port = urllib.parse.urlparse(redirect).port or 80
+    query = urllib.parse.urlencode(
+        {
+            "client_id": settings["clientId"],
+            "response_type": "code",
+            "redirect_uri": redirect,
+            "response_mode": "query",
+            "scope": GRAPH_SCOPES,
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    url = f"https://login.microsoftonline.com/{settings['tenantId']}/oauth2/v2.0/authorize?{query}"
+    caught = {}
+
+    class Catcher(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - the name is http.server's
+            answered = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            # The browser asks for the favicon of the page it was just shown,
+            # and anything else on this machine may knock on the port as well.
+            # Only what carries the answer is the answer.
+            if "code" in answered or "error" in answered:
+                caught.update(answered)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"<html><body><p>zyt has the sign-in. This tab can be closed.</p></body></html>")
+
+        def log_message(self, *_args):
+            pass
+
+    with http.server.HTTPServer(("127.0.0.1", port), Catcher) as server:
+        # Each wait is short and the deadline is the long one, so a knock on the
+        # port costs a moment rather than the sign-in.
+        server.timeout = 1
+        deadline = time.time() + SIGN_IN_SECONDS
+        print(f"Sign in as the reader the app is assigned to:\n{url}")
+        subprocess.run(["open", url], check=False)
+        while not caught and time.time() < deadline:
+            server.handle_request()
+    if not caught:
+        raise SystemExit("the sign-in did not come back within five minutes: nothing was stored.")
+    if "error" in caught:
+        raise SystemExit("the sign-in came back without a code: {}".format(caught["error"][0]))
+    if caught.get("state", [None])[0] != state:
+        raise SystemExit("the sign-in came back with another state: nothing was stored.")
+    answer = _token_request(
+        settings,
+        {
+            "client_id": settings["clientId"],
+            "grant_type": "authorization_code",
+            "code": caught["code"][0],
+            "redirect_uri": redirect,
+            "code_verifier": verifier,
+            "scope": GRAPH_SCOPES,
+        },
+    )
+    keychain(settings["clientId"], answer["refresh_token"])
+
+
+def calendar_view(settings: dict, start: float, end: float, token=None) -> list:
+    """The events between two moments, as epoch seconds. `calendarView` is the
+    one that matters: it expands a recurring series into the occurrences that
+    actually fall in the window, which the series itself does not say.
+
+    Start, end, all-day flag, busy status and the answer given are all it asks
+    for. A subject would say what the meeting is about, and the tracker only
+    needs to know that there was one."""
+    token = token or graph_token(settings)
+    query = urllib.parse.urlencode(
+        {
+            "startDateTime": _utc(start),
+            "endDateTime": _utc(end),
+            "$select": "start,end,isAllDay,showAs,responseStatus,isCancelled",
+            "$top": "200",
+            "$orderby": "start/dateTime",
+        }
+    )
+    url = f"{GRAPH}/me/calendarView?{query}"
+    out = []
+    # A page at a time, because a window of a few days can hold more events than
+    # one holds, and Graph says so in `@odata.nextLink` rather than by failing.
+    # The header pins the answer to UTC, which is what the times are read as.
+    while url:
+        request = urllib.request.Request(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Prefer": 'outlook.timezone="UTC"'},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as answer:
+                body = json.loads(answer.read())
+        except urllib.error.HTTPError as error:
+            detail = json.loads(error.read() or b"{}").get("error", {})
+            raise SystemExit(
+                f"Graph refused the calendar: {error.code} {detail.get('code', '')} {detail.get('message', '')}"
+            ) from None
+        for event in body.get("value", []):
+            out.append(
+                {
+                    "start": _epoch(event.get("start")),
+                    "end": _epoch(event.get("end")),
+                    "allDay": bool(event.get("isAllDay")),
+                    "cancelled": bool(event.get("isCancelled")),
+                    "status": event.get("showAs"),
+                    "response": (event.get("responseStatus") or {}).get("response"),
+                }
+            )
+        url = body.get("@odata.nextLink")
+    return [event for event in out if event["start"] and event["end"]]
+
+
+def _utc(moment: float) -> str:
+    return dt.datetime.fromtimestamp(moment, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _epoch(stamp) -> float:
+    """Graph dates are `2026-09-30T13:00:00.0000000` with a time zone beside
+    them, and UTC unless something asked for another one. Python before 3.11
+    cannot parse seven fractional digits, so the fraction goes."""
+    if not isinstance(stamp, dict) or not isinstance(stamp.get("dateTime"), str):
+        return 0
+    text = stamp["dateTime"].split(".")[0]
+    zone = stamp.get("timeZone") or "UTC"
+    try:
+        when = dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return 0
+    if zone.upper() == "UTC":
+        return when.replace(tzinfo=dt.timezone.utc).timestamp()
+    # The request asks for UTC and that is what standard events come back in,
+    # but an all-day event or a calendar of its own can answer in another zone.
+    # One of those must not take the rest of the day's events with it.
+    try:
+        return when.replace(tzinfo=zoneinfo.ZoneInfo(zone)).timestamp()
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+        # Graph names zones the Windows way unless it is asked for the other
+        # kind, and this machine knows only the other kind.
+        print(f"zyt: an event came back in {zone}, which is no zone here; it is left out", file=sys.stderr)
+        return 0
+
+
+def cmd_login(_args) -> int:
+    settings = meeting_settings(load_rules())
+    sign_in(settings)
+    print("signed in; the refresh token is in the login keychain.")
+    return 0
+
+
+def cmd_meetings(args) -> int:
+    settings = meeting_settings(load_rules())
+    now = time.time()
+    since = now - float(args.hours) * 3600
+    events = calendar_view(settings, since, now + 3600)
+    if args.json:
+        print(json.dumps({"events": events}))
+        return 0
+    if not events:
+        print("no events in that window")
+        return 0
+    for event in events:
+        print(
+            "{}  {}  {:>5}  {}".format(
+                dt.datetime.fromtimestamp(event["start"]).strftime("%a %d.%m. %H:%M"),
+                dt.datetime.fromtimestamp(event["end"]).strftime("%H:%M"),
+                event["status"] or "?",
+                "cancelled" if event["cancelled"] else (event["response"] or ""),
+            )
+        )
+    return 0
+
+
 def hook_directory(payload) -> str:
     """The directory a hook event is about: the file the tool touched when
     there is one, since a session started in a folder full of checkouts says
@@ -1275,6 +1571,11 @@ def main(argv=None) -> int:
     context.add_argument("source")
     context.add_argument("cwd", nargs="?", default=".")
     context.set_defaults(run=cmd_context)
+    sub.add_parser("login", help="sign in to Microsoft Graph once, for the calendar").set_defaults(run=cmd_login)
+    meetings = sub.add_parser("meetings", help="the calendar events zyt can see")
+    meetings.add_argument("--hours", type=float, default=24, help="how far back to look (default 24)")
+    meetings.add_argument("--json", action="store_true", help="print them as JSON, for the Spoon")
+    meetings.set_defaults(run=cmd_meetings)
     sub.add_parser("doctor", help="check the installation").set_defaults(run=cmd_doctor)
     args = parser.parse_args(argv)
     return args.run(args)

@@ -23,6 +23,15 @@
     { "contains": "Confluence", "class": "work" },
     { "contains": "GitHub", "class": "private" }
   ],
+  "meetings": {
+    "enabled": false,
+    "tenantId": "00000000-0000-0000-0000-000000000000",
+    "clientId": "00000000-0000-0000-0000-000000000000",
+    "class": "work",
+    "statuses": ["busy", "oof", "tentative"],
+    "minimumSeconds": 300,
+    "lookbackHours": 24
+  },
   "report": {
     "workdays": [1, 2, 3, 4, 5],
     "earliest": "07:00",
