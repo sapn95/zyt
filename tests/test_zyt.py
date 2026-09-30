@@ -1,16 +1,21 @@
 """The report's arithmetic, and the note the hook leaves behind."""
 
 import argparse
+import contextlib
 import datetime as dt
 import importlib.machinery
 import importlib.util
 import io
 import json
 import os
+import socket
 import sys
 import tempfile
+import threading
 import time
 import unittest
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -171,6 +176,226 @@ class Rendering(unittest.TestCase):
         as_json = zyt.week_json(days, blocks, booked, leftover)
         self.assertEqual(as_json["days"]["2026-09-14"]["booked"], 9 * 3600)
         self.assertEqual(as_json["leftover"], 0)
+
+
+class Calendar(unittest.TestCase):
+    def settings(self, **over):
+        settings = dict(zyt.MEETING_DEFAULTS)
+        settings.update({"enabled": True, "tenantId": "tenant", "clientId": "client"})
+        settings.update(over)
+        return settings
+
+    def test_the_rules_fill_the_calendar_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rules.json"
+            path.write_text(json.dumps({"meetings": {"enabled": True, "class": "private"}}))
+            rules = zyt.load_rules(path)
+            self.assertEqual(rules["meetings"]["class"], "private")
+            self.assertEqual(rules["meetings"]["statuses"], ["busy", "oof", "tentative"])
+            self.assertFalse(zyt.load_rules(Path(tmp) / "none.json")["meetings"]["enabled"])
+
+    def test_a_calendar_without_an_app_says_what_is_missing(self):
+        with self.assertRaises(SystemExit) as off:
+            zyt.meeting_settings({"meetings": dict(zyt.MEETING_DEFAULTS)})
+        self.assertIn("enabled", str(off.exception))
+        with self.assertRaises(SystemExit) as bare:
+            zyt.meeting_settings({"meetings": dict(zyt.MEETING_DEFAULTS, enabled=True)})
+        self.assertIn("tenantId", str(bare.exception))
+
+    def test_graph_dates_become_epoch_seconds(self):
+        moment = zyt._epoch({"dateTime": "2026-09-30T13:00:00.0000000", "timeZone": "UTC"})
+        self.assertEqual(dt.datetime.fromtimestamp(moment, dt.timezone.utc).hour, 13)
+        # an event that comes back in another zone is read in that zone, since
+        # an all-day event or a calendar of its own can answer in one
+        zurich = zyt._epoch({"dateTime": "2026-09-30T13:00:00.0000000", "timeZone": "Europe/Zurich"})
+        self.assertEqual(dt.datetime.fromtimestamp(zurich, dt.timezone.utc).hour, 11)
+        # and a zone this machine cannot name leaves that one event out rather
+        # than taking the rest of the day with it
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(
+                zyt._epoch({"dateTime": "2026-09-30T13:00:00.0000000", "timeZone": "W. Europe Standard Time"}), 0
+            )
+        self.assertIn("W. Europe Standard Time", said.getvalue())
+        self.assertEqual(zyt._epoch(None), 0)
+        self.assertEqual(zyt._epoch({"dateTime": "the day after tomorrow"}), 0)
+
+    def test_the_calendar_is_asked_for_times_and_nothing_else(self):
+        answer = json.dumps(
+            {
+                "value": [
+                    {
+                        "start": {"dateTime": "2026-09-30T08:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-09-30T09:00:00.0000000", "timeZone": "UTC"},
+                        "isAllDay": False,
+                        "isCancelled": False,
+                        "showAs": "busy",
+                        "responseStatus": {"response": "accepted"},
+                    },
+                    {"start": None, "end": None},
+                ]
+            }
+        ).encode()
+        seen = {}
+
+        class Fake:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return answer
+
+        def urlopen(request, timeout=None):
+            seen["url"] = request.full_url
+            seen["auth"] = request.headers["Authorization"]
+            seen["prefer"] = request.headers["Prefer"]
+            return Fake()
+
+        with mock.patch.object(zyt.urllib.request, "urlopen", urlopen):
+            events = zyt.calendar_view(self.settings(), 1790000000, 1790003600, token="a-token")
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["status"], "busy")
+        self.assertEqual(events[0]["response"], "accepted")
+        self.assertEqual(events[0]["end"] - events[0]["start"], 3600)
+        self.assertIn("calendarView", seen["url"])
+        self.assertEqual(seen["auth"], "Bearer a-token")
+        # the times are read as UTC, so the answer is pinned to it
+        self.assertEqual(seen["prefer"], 'outlook.timezone="UTC"')
+        # the subject and the attendees are not asked for, so they cannot leak
+        for field in ("subject", "attendees", "body", "location"):
+            self.assertNotIn(field, seen["url"])
+
+    def test_every_page_of_a_long_window_is_read(self):
+        def page(hour, nxt=None):
+            body = {
+                "value": [
+                    {
+                        "start": {"dateTime": f"2026-09-30T{hour:02d}:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": f"2026-09-30T{hour:02d}:30:00.0000000", "timeZone": "UTC"},
+                        "showAs": "busy",
+                    }
+                ]
+            }
+            if nxt:
+                body["@odata.nextLink"] = nxt
+            return json.dumps(body).encode()
+
+        pages = [page(8, "https://graph.microsoft.com/v1.0/me/calendarView?$skiptoken=two"), page(9)]
+        asked = []
+
+        class Fake:
+            def __init__(self, body):
+                self.body = body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return self.body
+
+        def urlopen(request, timeout=None):
+            asked.append(request.full_url)
+            return Fake(pages[len(asked) - 1])
+
+        with mock.patch.object(zyt.urllib.request, "urlopen", urlopen):
+            events = zyt.calendar_view(self.settings(), 1790000000, 1790600000, token="a-token")
+        # Graph says there is more in @odata.nextLink rather than by failing, so
+        # a window with more events than one page holds must not lose the rest
+        self.assertEqual(len(events), 2)
+        self.assertEqual(len(asked), 2)
+        self.assertIn("skiptoken=two", asked[1])
+
+    def test_the_sign_in_waits_for_the_answer_and_not_for_the_favicon(self):
+        # A port the machine says is free, rather than one this test hopes is:
+        # a fixed number is taken sooner or later, and the failure then looks
+        # like a broken sign-in instead of a busy port.
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        settings = self.settings(redirectUri=f"http://localhost:{port}")
+        stored = {}
+        exchanged = {}
+        opened = {}
+
+        def token_request(_settings, form):
+            exchanged.update(form)
+            return {"refresh_token": "a-refresh-token"}
+
+        with (
+            mock.patch.object(zyt, "_token_request", token_request),
+            mock.patch.object(zyt, "keychain", lambda account, secret=None: stored.update({account: secret})),
+            mock.patch.object(zyt.subprocess, "run", lambda args, **_kw: opened.update({"url": args[-1]})),
+        ):
+
+            def quietly():
+                with contextlib.redirect_stdout(io.StringIO()):
+                    zyt.sign_in(settings)
+
+            signing = threading.Thread(target=quietly, daemon=True)
+            signing.start()
+            deadline = time.time() + 20
+
+            def knock(path):
+                while time.time() < deadline:
+                    try:
+                        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as answer:
+                            return answer.status
+                    except OSError:
+                        time.sleep(0.1)
+                return None
+
+            try:
+                # The browser asks for the favicon of the page it was just
+                # shown, and a server that handles one request would have taken
+                # that for the answer and failed on a missing state.
+                self.assertEqual(knock("/favicon.ico"), 200)
+                self.assertTrue(signing.is_alive())
+
+                state = urllib.parse.parse_qs(urllib.parse.urlparse(opened["url"]).query)["state"][0]
+                self.assertEqual(knock(f"/?code=the-code&state={state}"), 200)
+            finally:
+                # Whatever happened above, the thread ends inside the patches:
+                # loose, it would reach the real keychain. After the callback it
+                # is already on its way out, so it is given a moment first; only
+                # a thread still waiting needs to be told to stop.
+                signing.join(timeout=5)
+                if signing.is_alive():
+                    knock("/?error=stop")
+                    signing.join(timeout=20)
+
+        self.assertFalse(signing.is_alive())
+        self.assertEqual(exchanged.get("code"), "the-code")
+        self.assertEqual(exchanged.get("grant_type"), "authorization_code")
+        self.assertEqual(stored, {"client": "a-refresh-token"})
+
+    def test_the_newest_refresh_token_is_the_one_kept(self):
+        stored = {"client": "old-refresh"}
+
+        def keychain(account, secret=None):
+            if secret is None:
+                return stored.get(account)
+            stored[account] = secret
+            return secret
+
+        with (
+            mock.patch.object(zyt, "keychain", keychain),
+            mock.patch.object(
+                zyt, "_token_request", return_value={"access_token": "fresh", "refresh_token": "new-refresh"}
+            ),
+        ):
+            self.assertEqual(zyt.graph_token(self.settings()), "fresh")
+        # Entra hands out a new one on every use and lets the old one lapse
+        self.assertEqual(stored["client"], "new-refresh")
+
+    def test_without_a_sign_in_it_says_so(self):
+        with mock.patch.object(zyt, "keychain", lambda *_args, **_kw: None), self.assertRaises(SystemExit) as told:
+            zyt.graph_token(self.settings())
+        self.assertIn("zyt login", str(told.exception))
 
 
 class Rules(unittest.TestCase):
