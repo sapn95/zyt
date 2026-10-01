@@ -1,6 +1,7 @@
 # 0011 — The board is one file, with no script in it and nothing to fetch
 
-**Status:** accepted, 2026-09-21; extended 2026-09-23 with the weeks either side.
+**Status:** accepted, 2026-09-21; extended 2026-09-23 with the weeks either
+side, and 2026-10-01 with a lane for the meetings.
 
 ## The problem
 
@@ -13,8 +14,16 @@ by eye.
 
 ## The decision
 
-`zyt board` writes one HTML file and opens it. Each day gets two lanes on a
-shared hour scale: what was recorded above, what is proposed for booking below.
+`zyt board` writes one HTML file and opens it. Each day gets three lanes on a
+shared hour scale: the hours at the keyboard above, the hours the calendar
+accounted for under them, and what is proposed for booking below both.
+
+The meetings have a lane of their own because they are a different kind of
+fact. The tracker saw the hours above; the hours in the middle are what a
+calendar said about a room somebody was in, and a day where the two disagree
+is worth seeing rather than adding up. They are both work and the totals say
+so, which is the other reason to separate them: the figure on the right has to
+keep meaning all of it.
 Holding one against the other is then looking, not counting. The scale is the
 window that may be booked, widened to whole hours around anything recorded or
 proposed outside it, so a Sunday evening is drawn where it happened instead of

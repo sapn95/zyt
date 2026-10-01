@@ -98,6 +98,10 @@ KEYCHAIN_SERVICE = "zyt-graph"
 # How long the one interactive sign-in waits for the browser to come back.
 SIGN_IN_SECONDS = 300
 
+# The source a row written from the calendar carries, which is also the name of
+# the lane it is drawn on.
+MEETING = "meeting"
+
 CHUNK_MINUTES = 15
 # How close two recorded segments of one class have to be for the board to draw
 # them as one bar. A tick that flickered between the classes and back leaves a
@@ -156,6 +160,13 @@ class Segment:
     start: dt.datetime
     end: dt.datetime
     cls: str
+    source: str = ""
+
+    @property
+    def kind(self) -> str:
+        """What the bar is: an hour at the keyboard, or one the calendar
+        accounted for. Both are work; they are not the same thing to look at."""
+        return MEETING if self.source == MEETING else self.cls
 
     @property
     def seconds(self) -> int:
@@ -174,7 +185,7 @@ def read_intervals(path: Path) -> list:
             except (KeyError, TypeError, ValueError):
                 continue
             if end > start and row.get("class") in ("work", "private"):
-                segments.append(Segment(start, end, row["class"]))
+                segments.append(Segment(start, end, row["class"], row.get("source") or ""))
     return segments
 
 
@@ -185,10 +196,10 @@ def split_by_day(segments: list) -> list:
         start = segment.start
         while start.date() < segment.end.date():
             midnight = dt.datetime.combine(start.date() + dt.timedelta(days=1), dt.time(), tzinfo=start.tzinfo)
-            out.append(Segment(start, midnight, segment.cls))
+            out.append(Segment(start, midnight, segment.cls, segment.source))
             start = midnight
         if segment.end > start:
-            out.append(Segment(start, segment.end, segment.cls))
+            out.append(Segment(start, segment.end, segment.cls, segment.source))
     return out
 
 
@@ -461,6 +472,7 @@ BOARD_STYLE = """
   color-scheme: light dark;
   --work: #3373d9;
   --private: #8c59bf;
+  --meeting: #2f8f83;
   --soft: rgba(51, 115, 217, 0.2);
   --outline: rgba(51, 115, 217, 0.6);
   --page: #f4f4f7;
@@ -541,6 +553,7 @@ h1 { margin: 0; font-size: 1.5rem; font-weight: 640; letter-spacing: -0.015em; }
 .lane span { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: 3px; }
 .work { background: var(--work); }
 .private { background: var(--private); }
+.meeting { background: var(--meeting); }
 .book { background: var(--soft); box-shadow: inset 0 0 0 1px var(--outline); }
 .figures { font-size: 0.78rem; color: var(--dim); }
 .figures b { margin-right: 0.35rem; color: var(--ink); font-size: 0.95rem; font-weight: 600; }
@@ -592,10 +605,10 @@ def joined(segments: list) -> list:
     out = []
     for segment in segments:
         last = out[-1] if out else None
-        if last and last.cls == segment.cls and (segment.start - last.end).total_seconds() <= JOIN_SECONDS:
+        if last and last.kind == segment.kind and (segment.start - last.end).total_seconds() <= JOIN_SECONDS:
             last.end = max(last.end, segment.end)
         else:
-            out.append(Segment(segment.start, segment.end, segment.cls))
+            out.append(Segment(segment.start, segment.end, segment.cls, segment.source))
     return out
 
 
@@ -604,8 +617,8 @@ def said(segment: Segment) -> str:
     its seconds: a sliver that claimed to have taken 0h00 would be a lie about the
     one thing it is there to report."""
     if segment.seconds < 60:
-        return f"{segment.cls} {segment.start:%H:%M:%S}, {segment.seconds}s"
-    return f"{segment.cls} {segment.start:%H:%M} to {segment.end:%H:%M}, {fmt_h(segment.seconds)}"
+        return f"{segment.kind} {segment.start:%H:%M:%S}, {segment.seconds}s"
+    return f"{segment.kind} {segment.start:%H:%M} to {segment.end:%H:%M}, {fmt_h(segment.seconds)}"
 
 
 def bars(spans: list, first: int, total: int) -> str:
@@ -680,7 +693,9 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         summary = days[day]
         work += summary["work"] // 60
         private += summary["private"] // 60
-        recorded = [(*span_of(segment), segment.cls, said(segment)) for segment in joined(segments.get(day, []))]
+        drawn = joined(segments.get(day, []))
+        recorded = [(*span_of(segment), segment.kind, said(segment)) for segment in drawn if segment.kind != MEETING]
+        met = [(*span_of(segment), MEETING, said(segment)) for segment in drawn if segment.kind == MEETING]
         proposed = [
             (start, end, "book", f"book {clock(start)} to {clock(end)}, {fmt_m(end - start)}")
             for start, end in blocks.get(day, [])
@@ -696,6 +711,7 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         rows.append(
             f'<div class="row"><div class="day"><b>{day:%a}</b> {day:%d.%m.}</div>'
             f'<div class="track"><div class="lane">{bars(recorded, first, total)}</div>'
+            f'<div class="lane">{bars(met, first, total)}</div>'
             f'<div class="lane">{bars(proposed, first, total)}</div></div>'
             f'<div class="figures">{figures}<span class="booking">{html.escape(booking)}</span></div></div>'
         )
@@ -719,7 +735,12 @@ def render_board(weeks: list, title: str) -> str:
     """The weeks as one file, the one asked for on show and the rest a link away.
     They are all written out because a page that could fetch the next week would
     need something to fetch it from, and this is a file (ADR 0011)."""
-    keys = [("work", "recorded work"), ("private", "private"), ("book", "proposed booking")]
+    keys = [
+        ("work", "at the keyboard"),
+        (MEETING, "in a meeting"),
+        ("private", "private"),
+        ("book", "proposed booking"),
+    ]
     source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)
     made = f"written {dt.datetime.now():%d.%m.%Y %H:%M} from {source} · one file, no script, nothing fetched"
     return "\n".join(

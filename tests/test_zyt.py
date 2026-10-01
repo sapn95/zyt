@@ -601,9 +601,25 @@ class Board(unittest.TestCase):
         self.assertTrue(page.startswith("<!doctype html>"))
         self.assertIn('title="work 09:00 to 17:00, 8h00"', page)  # the recorded lane
         self.assertIn('title="book 09:00 to 12:30, 3h30"', page)  # and the proposal below it
+        self.assertIn("in a meeting", page)  # and the lane the calendar fills has a key
         self.assertIn("moved to the workdays", page)
         for absent in ("<script", "http", "<img"):
             self.assertNotIn(absent, page)
+
+    def test_the_meetings_have_a_lane_of_their_own(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "intervals.csv"
+            path.write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T09:00:00+02:00,2026-09-14T10:00:00+02:00,3600,work,app,Code\n"
+                "2026-09-14T10:00:00+02:00,2026-09-14T11:00:00+02:00,3600,work,meeting,calendar\n"
+            )
+            page = zyt.drawn_week(zyt.read_intervals(path), dt.date(2026, 9, 14), dict(zyt.REPORT_DEFAULTS))
+        # an hour at the keyboard and an hour in a meeting are both work and
+        # are not the same thing to look at, so they do not share a bar
+        self.assertIn('title="work 09:00 to 10:00, 1h00"', page)
+        self.assertIn('class="meeting"', page)
+        self.assertIn('title="meeting 10:00 to 11:00, 1h00"', page)
 
     def test_a_bar_with_no_whole_minute_in_it_says_its_seconds(self):
         self.assertEqual(zyt.said(seg("2026-09-14", "09:00", "17:00")), "work 09:00 to 17:00, 8h00")
