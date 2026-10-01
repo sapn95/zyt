@@ -437,6 +437,18 @@ class Lunch(unittest.TestCase):
         self.assertEqual(blocks[-1][1], zyt.minutes(report["latest"]))
         self.assertEqual(sum(end - start for start, end in blocks), 720)
 
+    def test_lunch_is_placed_against_the_start_the_day_ends_up_with(self):
+        # 700 minutes from nine runs to 21:40 and is pulled back by an hour and
+        # forty, which used to drag lunch to 10:50 with it
+        report = self.report()
+        blocks = zyt.layout(9 * 60, 700, report)
+        self.assertEqual(sum(end - start for start, end in blocks), 700)
+        self.assertLessEqual(blocks[-1][1], zyt.minutes(report["latest"]))
+        if len(blocks) > 1:
+            first_break = blocks[0][1]
+            self.assertGreaterEqual(first_break, zyt.minutes(report["lunch"]["earliest"]))
+            self.assertLessEqual(first_break + report["breakMinutes"], zyt.minutes(report["lunch"]["latest"]))
+
     def test_a_day_that_cannot_fit_the_window_is_moved_as_a_whole(self):
         # twelve hours of work and two breaks need more than the window holds,
         # so something has to give: every block and every break keeps its

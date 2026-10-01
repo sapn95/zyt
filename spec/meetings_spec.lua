@@ -154,3 +154,71 @@ describe("meetings.gaps", function()
     assert.same({ { start = hour(8), finish = hour(12) } }, meetings.gaps({}, hour(8), hour(12), 300))
   end)
 end)
+
+describe("meetings.sync", function()
+  local function stamp(hour, minute)
+    return os.date(
+      "%Y-%m-%dT%H:%M:%S%z",
+      os.time({ year = 2026, month = 9, day = 30, hour = hour, min = minute or 0, sec = 0 })
+    )
+  end
+
+  local function at(hour, minute)
+    return os.time({ year = 2026, month = 9, day = 30, hour = hour, min = minute or 0, sec = 0 })
+  end
+
+  local function line(fromHour, toHour, source)
+    return ("%s,%s,%d,work,%s,calendar"):format(stamp(fromHour), stamp(toHour), (toHour - fromHour) * 3600, source)
+  end
+
+  local SET = { statuses = { "busy" }, minimumSeconds = 300, class = "work" }
+
+  local function meeting(fromHour, toHour)
+    return { start = at(fromHour), ["end"] = at(toHour), status = "busy", response = "accepted" }
+  end
+
+  it("reads the rows back with the source they carry", function()
+    local rows =
+      meetings.rows("start,end,seconds,class,source,app\n" .. line(9, 10, "meeting") .. "\n" .. line(11, 12, "app"))
+    assert.equal(2, #rows)
+    assert.equal("meeting", rows[1].source)
+    assert.equal(at(11), rows[2].start)
+  end)
+
+  it("writes what is missing and takes out what the calendar no longer says", function()
+    local rows = meetings.rows(line(9, 10, "meeting") .. "\n" .. line(14, 15, "meeting"))
+    -- the calendar still has the morning one and has lost the afternoon one
+    local add, drop = meetings.sync(SET, rows, { meeting(9, 10), meeting(16, 17) }, at(8), at(18), at(18))
+    assert.same({ { start = at(16), finish = at(17), seconds = 3600 } }, add)
+    assert.equal(1, #drop)
+    assert.equal(at(14), drop[1].start)
+  end)
+
+  it("never touches a row the tracker wrote itself", function()
+    local rows = meetings.rows(line(9, 10, "app"))
+    local add, drop = meetings.sync(SET, rows, {}, at(8), at(18), at(18))
+    assert.same({}, add)
+    assert.same({}, drop)
+  end)
+
+  it("leaves the hours the tracker recorded to the tracker", function()
+    -- a meeting the person sat through at the keyboard is already in the
+    -- record, and the calendar does not get to write it a second time
+    local rows = meetings.rows(line(9, 10, "app"))
+    local add = meetings.sync(SET, rows, { meeting(9, 10) }, at(8), at(18), at(18))
+    assert.same({}, add)
+  end)
+
+  it("books nothing that has not happened yet", function()
+    local add = meetings.sync(SET, {}, { meeting(9, 10), meeting(16, 17) }, at(8), at(20), at(12))
+    -- the window reaches forward so that a meeting which moved can be found,
+    -- not so that tomorrow can be booked
+    assert.same({ { start = at(9), finish = at(10), seconds = 3600 } }, add)
+  end)
+
+  it("leaves a row that reaches outside the window alone", function()
+    local rows = meetings.rows(line(7, 9, "meeting"))
+    local _, drop = meetings.sync(SET, rows, {}, at(8), at(18), at(18))
+    assert.same({}, drop)
+  end)
+end)

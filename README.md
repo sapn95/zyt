@@ -149,14 +149,24 @@ consented for you alone:
 login keychain. `zyt meetings` prints what it can see, which is the way to check
 that the sign-in and the scope are right.
 
-`zyt fill` catches the record up: every gap of the last week that a meeting
-covered gets its rows, which is how the days before you turned this on get
-their hours. `zyt fill --all` goes back to the first row there is. From then on it fills itself in. When you come back, on a wake or an unlock, the
-Spoon asks what covered the time since the last row and writes what it finds as
-`work`, source `meeting`. It stops at the segment that opened when you came
-back, so nothing is counted twice, it leaves out what you declined, what was
-cancelled, what says `free` and what lasts the whole day, and it merges what
-runs back to back.
+From then on it keeps itself in line. When you come back, on a wake or an
+unlock, the Spoon asks what covered the time since the last row and writes what
+it finds as `work`, source `meeting`. It stops at the segment that opened when
+you came back, so nothing is counted twice, it leaves out what you declined,
+what was cancelled, what says `free` and what lasts the whole day, and it merges
+what runs back to back.
+
+Every `syncHours` it goes over a whole window, `lookbackDays` back and
+`lookaheadDays` forward, and brings the record into line with the calendar:
+rows that are missing are written, and rows a meeting left behind when it moved
+or was called off are taken out again. Nothing is ever written for time that has
+not happened; the window reaches forward so that a meeting which moved can be
+recognised there, not so that tomorrow can be booked. Rows the tracker wrote
+itself are never touched.
+
+`zyt sync` does the same round by hand, and `zyt sync --all` goes back to the
+first row there is, which is how the days before you turned this on get their
+hours.
 
 ## The week
 
@@ -264,7 +274,7 @@ says whether it does.
 | `zyt board [2026-W38\|2026-09-14]` | The same, drawn as one HTML file, and opened |
 | `zyt login` | Sign in to Microsoft Graph once, for the calendar |
 | `zyt meetings [--hours 24]` | The events it can see, `--json` for the Spoon |
-| `zyt fill [--days 7\|--all]` | Write the meetings of past gaps into the record |
+| `zyt sync [--back 30 --ahead 60\|--all]` | Bring the record into line with the calendar |
 | `zyt hook claude-code` | The stdin hook for Claude Code |
 | `zyt context <source> [dir]` | Leave the same note from anything else |
 | `zyt link` · `zyt unlink` | Put the Spoon where Hammerspoon finds it, take it out |
