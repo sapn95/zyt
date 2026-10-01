@@ -63,8 +63,10 @@ function M.fill(settings, from, to, events)
       local begins = tonumber(event.start)
       local ends = tonumber(event.finish or event["end"])
       if begins and ends then
-        local start = math.max(begins, from)
-        local finish = math.min(ends, to)
+        -- Whole seconds: the calendar answers in fractions of one, and a row
+        -- that says 6074.0 is a row somebody has to read twice.
+        local start = math.floor(math.max(begins, from))
+        local finish = math.floor(math.min(ends, to))
         if finish > start then
           pieces[#pieces + 1] = { start = start, finish = finish }
         end
