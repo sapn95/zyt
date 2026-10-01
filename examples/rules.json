@@ -29,6 +29,7 @@
     "clientId": "00000000-0000-0000-0000-000000000000",
     "class": "work",
     "statuses": ["busy", "oof", "tentative"],
+    "skipSubjects": ["social event", "team event"],
     "minimumSeconds": 300,
     "lookbackHours": 24
   },

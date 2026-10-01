@@ -89,6 +89,10 @@ MEETING_DEFAULTS = {
     # What an event has to say about the time it takes. `free` never counts, and
     # `workingElsewhere` is a day somewhere else rather than a meeting.
     "statuses": ["busy", "oof", "tentative"],
+    # Subjects that mean the hour is not work: a team event, a drink, whatever
+    # is in the diary because people are in the same room rather than because
+    # anybody is working. Matched as text inside the subject, case ignored.
+    "skipSubjects": [],
     "minimumSeconds": 300,
     "lookbackHours": 24,
 }
@@ -1414,11 +1418,12 @@ def calendar_view(settings: dict, start: float, end: float, token=None) -> list:
     for. A subject would say what the meeting is about, and the tracker only
     needs to know that there was one."""
     token = token or graph_token(settings)
+    skipped_count = [0]
     query = urllib.parse.urlencode(
         {
             "startDateTime": _utc(start),
             "endDateTime": _utc(end),
-            "$select": "start,end,isAllDay,showAs,responseStatus,isCancelled",
+            "$select": "start,end,isAllDay,showAs,responseStatus,isCancelled,subject",
             "$top": "200",
             "$orderby": "start/dateTime",
         }
@@ -1442,6 +1447,13 @@ def calendar_view(settings: dict, start: float, end: float, token=None) -> list:
                 f"Graph refused the calendar: {error.code} {detail.get('code', '')} {detail.get('message', '')}"
             ) from None
         for event in body.get("value", []):
+            # The subject decides here and goes no further. It is read to see
+            # whether the hour is work at all, and what is handed on is times
+            # and a status: nothing that says what the meeting was about ever
+            # reaches the record, the Spoon, or the screen.
+            if skipped(settings, event.get("subject")):
+                skipped_count[0] += 1
+                continue
             out.append(
                 {
                     "start": _epoch(event.get("start")),
@@ -1453,7 +1465,25 @@ def calendar_view(settings: dict, start: float, end: float, token=None) -> list:
                 }
             )
         url = body.get("@odata.nextLink")
+    if skipped_count[0]:
+        print(
+            f"zyt: {skipped_count[0]} event{'' if skipped_count[0] == 1 else 's'} left out by meetings.skipSubjects",
+            file=sys.stderr,
+        )
     return [event for event in out if event["start"] and event["end"]]
+
+
+def skipped(settings: dict, subject) -> bool:
+    """Whether a subject says the hour is not work. A team event, a drink, a
+    social evening: in the diary because people are in the same room, which is
+    not the same as working. Text inside the subject, case ignored, because a
+    pattern language would be a second thing to get wrong."""
+    if not isinstance(subject, str):
+        return False
+    lowered = subject.lower()
+    return any(
+        isinstance(mark, str) and mark and mark.lower() in lowered for mark in settings.get("skipSubjects") or []
+    )
 
 
 def _utc(moment: float) -> str:
