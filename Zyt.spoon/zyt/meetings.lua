@@ -99,6 +99,43 @@ function M.fill(settings, from, to, events)
   return out
 end
 
+--- The stretches of `from` to `to` that the record says nothing about, longest
+--- first in time order. A gap is where the tracker was not running or nobody
+--- was at the keyboard: the places a calendar can account for.
+---
+--- Rows arrive in the order they were written, which is not the order they
+--- happened once a gap has been filled in after the fact, so they are sorted.
+--- A row that overlaps the one before it moves the edge of the covered time
+--- forward rather than opening a gap behind it.
+function M.gaps(rows, from, to, minimum)
+  local spans = {}
+  for _, row in ipairs(rows or {}) do
+    local start = M.moment(row.start)
+    local finish = M.moment(row.finish)
+    if start and finish and finish > start and finish > from and start < to then
+      spans[#spans + 1] = { start = start, finish = finish }
+    end
+  end
+  table.sort(spans, function(a, b)
+    return a.start < b.start
+  end)
+  local out = {}
+  local reach = from
+  local least = tonumber(minimum) or 0
+  for _, span in ipairs(spans) do
+    if span.start - reach >= least then
+      out[#out + 1] = { start = reach, finish = span.start }
+    end
+    if span.finish > reach then
+      reach = span.finish
+    end
+  end
+  if to - reach >= least then
+    out[#out + 1] = { start = reach, finish = to }
+  end
+  return out
+end
+
 --- The moment a written row says, as seconds.
 ---
 --- The offset the row carries is what decides it, not the zone this machine is
