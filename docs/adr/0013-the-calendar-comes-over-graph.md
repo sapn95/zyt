@@ -79,8 +79,27 @@ an hour anybody worked.
 
 The command line does the asking in a shell of its own, so a round trip to Graph
 never holds up a tick, and the Spoon writes the rows itself. Nothing else writes
-that file: `zyt fill`, which catches a whole week up at once, reads the calendar
-and hands the events to the Spoon rather than writing a row of its own.
+that file: `zyt sync`, which brings a whole window into line at once, reads the
+calendar and hands the events to the Spoon rather than writing a row of its own.
+
+## Taking a row back out
+
+A meeting that moved, was shortened or called off leaves a row behind that is no
+longer true, and nothing in a record that only ever grows can say so. Every
+`syncHours` the Spoon goes over a window, `lookbackDays` back and
+`lookaheadDays` forward, and makes the meeting rows in it say what the calendar
+says: what is missing is written, what the calendar no longer accounts for is
+taken out.
+
+Only rows whose source is `meeting` are ever removed, and only when they lie
+whole inside the window: a row reaching past its edge is about time this round
+knows nothing about. Rows the tracker wrote itself are never touched, and the
+hours it recorded are left to it, so a meeting somebody sat through at the
+keyboard is not written a second time.
+
+The file is written whole and renamed into place, so a reader sees either the
+old one or the new one. The Spoon is single-threaded and does this between
+ticks, which is what keeps a row written in the same moment from being lost.
 
 ## What was rejected
 

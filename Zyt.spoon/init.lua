@@ -972,6 +972,45 @@ function obj:lastRecorded()
   return last and meetings.moment(last.finish) or nil
 end
 
+--- Ask the calendar about the whole window and bring the record into line with
+--- it. Every `syncHours` and once shortly after a start, because a meeting that
+--- was called off or moved leaves a row behind that is no longer true and
+--- nothing else would ever take it out.
+function obj:syncWindow()
+  local settings = self.rules.meetings
+  if not self.running or not settings.enabled or self.syncing then
+    return
+  end
+  self.syncing = true
+  local now = os.time()
+  local from = now - settings.lookbackDays * 86400
+  local to = now + settings.lookaheadDays * 86400
+  local command = ("%q meetings --json --from %d --to %d"):format(self.cli, from, to)
+  local task = hs.task.new("/bin/zsh", function(code, out, err)
+    self.syncing = false
+    if code ~= 0 then
+      self.logger.e("zyt meetings: " .. tostring(err ~= "" and err or out))
+      return
+    end
+    if err and err ~= "" then
+      self.logger.w("zyt meetings: " .. err)
+    end
+    local ok, answer = pcall(hs.json.decode, out)
+    if not ok or type(answer) ~= "table" then
+      self.logger.e("zyt meetings said something that is not JSON")
+      return
+    end
+    local told = self:syncMeetings(hs.json.encode({ from = from, to = to, events = answer.events or {} }))
+    if told ~= "0 0" then
+      self.logger.i("calendar sync: " .. told .. " (seconds added, rows removed)")
+    end
+  end, { "-lc", command })
+  if not task:start() then
+    self.syncing = false
+    self.logger.e("zyt meetings could not be started")
+  end
+end
+
 --- The hours the calendar can account for and the tracker cannot: a meeting
 --- sat through with the notebook shut, or in a room with it open and
 --- untouched, where the idle rule ended the segment at the last keystroke.
@@ -1029,33 +1068,70 @@ function obj:fillMeetings()
   end
 end
 
---- Zyt:fillGaps(payload)
+--- Zyt:syncMeetings(payload)
 --- Method
---- Fill every gap in a window, from events handed in as JSON:
---- `{ from = seconds, to = seconds, events = { ... } }`. The command line reads
---- the calendar and calls this, so the record keeps one writer and the whole of
---- a week can be caught up with at once. Returns the seconds written, or -1
---- when the payload is not one.
-function obj:fillGaps(payload)
+--- Bring a window of the record into line with the calendar, from events handed
+--- in as JSON: `{ from = seconds, to = seconds, events = { ... } }`. Writes the
+--- meeting rows that are missing and takes out the ones the calendar no longer
+--- says anything about, which is what a meeting that moved or was called off
+--- leaves behind. Returns `added removed` as text, or `-1` when the payload is
+--- not one.
+---
+--- The command line reads the calendar and calls this, so the record keeps one
+--- writer.
+function obj:syncMeetings(payload)
   local ok, body = pcall(hs.json.decode, payload)
   if not ok or type(body) ~= "table" then
-    return -1
+    return "-1"
   end
   local from, to = tonumber(body.from), tonumber(body.to)
   if not from or not to or to <= from then
-    return -1
+    return "-1"
   end
-  if not self.rows then
-    self.rows = totals.parse(readFile(self.statePath .. "/intervals.csv"))
+  local path = self.statePath .. "/intervals.csv"
+  local rows = meetings.rows(readFile(path))
+  -- The segment that is open is not in the file yet, and the time it covers is
+  -- being recorded properly. A round that did not know about it would write a
+  -- meeting over the hour somebody is sitting in at the keyboard, and give a
+  -- meeting still going on a row ending now that the next round would replace.
+  local open = self.state and self.state.open
+  local upTo = (open and open.start) or os.time()
+  local add, drop = meetings.sync(self.rules.meetings, rows, body.events or {}, from, to, upTo)
+  local removed = 0
+  if #drop > 0 then
+    local gone = {}
+    for _, row in ipairs(drop) do
+      gone[row.line] = true
+    end
+    local kept = {}
+    for line in (readFile(path) or ""):gmatch("[^\n]+") do
+      if gone[line] then
+        removed = removed + 1
+      else
+        kept[#kept + 1] = line
+      end
+    end
+    -- Written whole and renamed into place, so a file that is read while this
+    -- happens is either the old one or the new one.
+    writeAtomically(path, table.concat(kept, "\n") .. "\n")
+    self.rows = nil
   end
-  -- The gaps are worked out before the first row is written, because writing
-  -- one closes the gap it was written into.
-  local holes = meetings.gaps(self.rows, from, to, self.rules.meetings.minimumSeconds)
   local written = 0
-  for _, hole in ipairs(holes) do
-    written = written + self:writeMeetings(hole.start, hole.finish, body.events or {})
+  for _, piece in ipairs(add) do
+    self:append({
+      start = clock.iso(piece.start),
+      finish = clock.iso(piece.finish),
+      seconds = piece.seconds,
+      class = self.rules.meetings.class,
+      source = meetings.SOURCE,
+      app = "calendar",
+    })
+    written = written + piece.seconds
   end
-  return written
+  if written > 0 or removed > 0 then
+    self:refresh()
+  end
+  return ("%d %d"):format(written, removed)
 end
 
 --- The rows for one gap. Kept apart from the asking, so what is written can be
@@ -1376,6 +1452,17 @@ function obj:start()
   end)
   self:watch()
   self:armTimer()
+  if self.rules.meetings.enabled then
+    -- Shortly after the start rather than at it, so a machine coming up has
+    -- its network before the first question goes out.
+    self.syncSoon = hs.timer.doAfter(60, function()
+      self.syncSoon = nil
+      self:syncWindow()
+    end)
+    self.syncTimer = hs.timer.doEvery(self.rules.meetings.syncHours * 3600, function()
+      self:syncWindow()
+    end)
+  end
   local previousShutdown = hs.shutdownCallback
   hs.shutdownCallback = function()
     if self.running then
@@ -1402,9 +1489,11 @@ function obj:stop()
   end
   self:closeNow()
   self:dismiss()
-  if self.timer then
-    self.timer:stop()
-    self.timer = nil
+  for _, key in ipairs({ "timer", "syncTimer", "syncSoon" }) do
+    if self[key] then
+      self[key]:stop()
+      self[key] = nil
+    end
   end
   for _, key in ipairs({ "watcher", "appWatcher" }) do
     if self[key] then

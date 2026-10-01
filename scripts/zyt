@@ -258,27 +258,36 @@ def lunch_end(start: int, total: int, report: dict) -> int:
     """When the first block ends on a day that has a lunch break: inside the
     lunch window, no longer than one block, and never past what is left to
     book. Zero when the day cannot have one, which is a day short enough to
-    need no break, or one that starts after the window has gone by."""
+    need no break, one that starts after the window has gone by, and one that
+    starts early enough for a whole block to end before lunch could begin."""
     lunch = report.get("lunch")
     if not lunch or total <= report["maxBlockMinutes"]:
         return 0
     earliest, latest = minutes(lunch["earliest"]), minutes(lunch["latest"])
     end = min(start + report["maxBlockMinutes"], latest - report["breakMinutes"])
     morning = end - start
-    # A block is never stretched to reach the window: a day that starts early
-    # enough for a full block to end before lunch could begin keeps the
-    # ordinary layout, and so does one with nothing left for an afternoon.
+    # A block is never stretched to reach the window, and a morning has to
+    # leave something for the afternoon.
     if end < earliest or morning <= 0 or morning >= total:
         return 0
-    # And the day has to still fit the window. A short morning pushes the rest
-    # into one block more than it would otherwise need, which is one break
-    # more, and a day that no longer fits is shifted out of the window at both
-    # ends: an earlier start than `earliest` and a lunch nowhere near midday.
-    blocks = 1 + -(-(total - morning) // report["maxBlockMinutes"])
-    needed = total + (blocks - 1) * report["breakMinutes"]
-    if needed > latest_minute(report) - minutes(report["earliest"]):
-        return 0
     return end
+
+
+def blocks_from(start: int, total: int, report: dict, midday: int = 0) -> list:
+    """Blocks of at most maxBlockMinutes with a break between, from `start`.
+    With `midday` the first block ends there, which is where lunch goes."""
+    blocks = []
+    cursor, remaining = start, total
+    if midday:
+        blocks.append([cursor, midday])
+        remaining -= midday - cursor
+        cursor = midday + report["breakMinutes"]
+    while remaining > 0:
+        block = min(report["maxBlockMinutes"], remaining)
+        blocks.append([cursor, cursor + block])
+        cursor += block + report["breakMinutes"]
+        remaining -= block
+    return blocks
 
 
 def layout(start: int, total: int, report: dict) -> list:
@@ -289,28 +298,25 @@ def layout(start: int, total: int, report: dict) -> list:
     is taken. Without that it lands wherever the first block happens to end,
     which on a day that started at nine is the middle of the afternoon.
 
-    A day holding more than the window can (blocks and breaks together) is
-    shifted earlier as a whole, lunch with it. Something has to give there, and
-    the alternative is a lunch break longer than `breakMinutes` or a booking
-    that runs past `latest`; moving the whole day keeps every block and every
-    break the length it was meant to be."""
-    blocks = []
-    cursor, remaining = start, total
-    midday = lunch_end(start, total, report)
-    if midday:
-        blocks.append([cursor, midday])
-        remaining -= midday - cursor
-        cursor = midday + report["breakMinutes"]
-    while remaining > 0:
-        block = min(report["maxBlockMinutes"], remaining)
-        blocks.append([cursor, cursor + block])
-        cursor += block + report["breakMinutes"]
-        remaining -= block
-    if blocks:
-        overshoot = blocks[-1][1] - minutes(report["latest"])
+    Lunch is placed against the start the day ends up with, not the one it came
+    in with: a day that has to be shifted earlier to fit would otherwise carry
+    its lunch break out of the window with it. A day that cannot hold the extra
+    break the split costs keeps the plain layout, where the break falls where
+    it falls and every block is still the length it should be."""
+    plain = blocks_from(start, total, report)
+    if plain:
+        overshoot = plain[-1][1] - latest_minute(report)
         if overshoot > 0:
-            blocks = [[s - overshoot, e - overshoot] for s, e in blocks]
-    return blocks
+            plain = [[s - overshoot, e - overshoot] for s, e in plain]
+    if not plain:
+        return plain
+    midday = lunch_end(plain[0][0], total, report)
+    if not midday:
+        return plain
+    split = blocks_from(plain[0][0], total, report, midday)
+    if split[-1][1] <= latest_minute(report):
+        return split
+    return plain
 
 
 def propose(days: dict, report: dict) -> tuple:
@@ -1458,45 +1464,48 @@ def first_recorded(path: Path):
     return earliest
 
 
-def cmd_fill(args) -> int:
-    """Catch the record up with the calendar: every gap in the last `--days`
-    that a meeting covered gets its rows. The Spoon does the writing, because
-    it owns that file; this reads the calendar and hands the events over."""
+def cmd_sync(args) -> int:
+    """Bring the record into line with the calendar over a window: write the
+    meeting rows that are missing, take out the ones a meeting that moved or was
+    called off left behind. The Spoon does the writing, because it owns that
+    file; this reads the calendar and hands the events over."""
     settings = meeting_settings(load_rules())
     now = time.time()
     if args.all:
         since = first_recorded(STATE / "intervals.csv")
         if since is None:
-            print("nothing recorded yet, so there is no gap to fill")
+            print("nothing recorded yet, so there is nothing to bring into line")
             return 0
     else:
-        since = now - float(args.days) * 86400
-    events = calendar_view(settings, since, now)
-    payload = json.dumps({"from": since, "to": now, "events": events})
+        since = now - float(args.back) * 86400
+    until = now + float(args.ahead) * 86400
+    events = calendar_view(settings, since, until)
+    payload = json.dumps({"from": since, "to": until, "events": events})
     # A long bracket, because the payload is JSON and holds quotes; `]==]`
     # cannot appear in it.
-    answer = hs_call(f"return _G.zyt and tostring(_G.zyt:fillGaps([==[{payload}]==])) or 'null'", timeout=30)
+    answer = hs_call(f"return _G.zyt and _G.zyt:syncMeetings([==[{payload}]==]) or 'null'", timeout=60)
     if not answer or answer == "null":
         print("zyt is not running in Hammerspoon (try: zyt doctor)")
         return 1
     try:
-        seconds = int(float(answer))
+        seconds, removed = (int(part) for part in answer.split())
     except ValueError:
         print(f"the Spoon answered {answer!r}")
         return 1
-    if seconds < 0:
-        print("the Spoon could not read what it was handed")
-        return 1
-    span = "the whole record" if args.all else f"the last {args.days:g} days"
-    print(f"filled {seconds // 3600}h{seconds % 3600 // 60:02d} of meetings from {span}")
+    span = "the whole record" if args.all else f"the last {args.back:g} days"
+    print(
+        f"{seconds // 3600}h{seconds % 3600 // 60:02d} of meetings written and "
+        f"{removed} row{'' if removed == 1 else 's'} taken out, over {span}"
+    )
     return 0
 
 
 def cmd_meetings(args) -> int:
     settings = meeting_settings(load_rules())
     now = time.time()
-    since = now - float(args.hours) * 3600
-    events = calendar_view(settings, since, now + 3600)
+    since = float(args.start) if args.start else now - float(args.hours) * 3600
+    until = float(args.until_) if args.until_ else now + 3600
+    events = calendar_view(settings, since, until)
     if args.json:
         print(json.dumps({"events": events}))
         return 0
@@ -1671,11 +1680,14 @@ def main(argv=None) -> int:
     meetings = sub.add_parser("meetings", help="the calendar events zyt can see")
     meetings.add_argument("--hours", type=float, default=24, help="how far back to look (default 24)")
     meetings.add_argument("--json", action="store_true", help="print them as JSON, for the Spoon")
+    meetings.add_argument("--from", dest="start", type=float, help="the first moment, as seconds since the epoch")
+    meetings.add_argument("--to", dest="until_", type=float, help="the last moment, as seconds since the epoch")
     meetings.set_defaults(run=cmd_meetings)
-    fill = sub.add_parser("fill", help="write the meetings of past gaps into the record")
-    fill.add_argument("--days", type=float, default=7, help="how far back to look (default 7)")
-    fill.add_argument("--all", action="store_true", help="every day there is a row for, back to the first")
-    fill.set_defaults(run=cmd_fill)
+    sync = sub.add_parser("sync", help="bring the record into line with the calendar")
+    sync.add_argument("--back", type=float, default=30, help="how many days back (default 30)")
+    sync.add_argument("--ahead", type=float, default=60, help="how many days forward (default 60)")
+    sync.add_argument("--all", action="store_true", help="every day there is a row for, back to the first")
+    sync.set_defaults(run=cmd_sync)
     sub.add_parser("doctor", help="check the installation").set_defaults(run=cmd_doctor)
     args = parser.parse_args(argv)
     return args.run(args)
