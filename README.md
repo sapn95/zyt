@@ -149,12 +149,12 @@ consented for you alone:
 login keychain. `zyt meetings` prints what it can see, which is the way to check
 that the sign-in and the scope are right.
 
-From then on it keeps itself in line. When you come back, on a wake or an
-unlock, the Spoon asks what covered the time since the last row and writes what
-it finds as `work`, source `meeting`. It stops at the segment that opened when
-you came back, so nothing is counted twice, it leaves out what you declined,
-what was cancelled, what says `free` and what lasts the whole day, and it merges
-what runs back to back.
+From then on it keeps itself in line. A meeting is written as the calendar has
+it, the whole of it, whether or not you were at the keyboard through it: both
+are true. Two rows over one hour are one hour, because the totals take the union
+of what is covered rather than the sum. It leaves out what you declined, what
+was cancelled, what says `free` and what lasts the whole day, merges what runs
+back to back, and writes nothing into the hour you are in right now.
 
 Every `syncHours` it goes over a whole window, `lookbackDays` back and
 `lookaheadDays` forward, and brings the record into line with the calendar:

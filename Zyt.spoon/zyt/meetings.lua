@@ -50,20 +50,22 @@ function M.counts(settings, event)
 end
 
 --- The stretches of `from` to `to` that a meeting covered, in order, merged
---- where they meet and cut to the gap at both ends.
+--- where they meet and cut to the window at both ends.
 ---
---- Merged, because what goes into the record is time and not meetings: two that
---- run back to back are one stretch of the afternoon, and two rows that touch
---- would only be read as one anyway. Anything shorter than `minimumSeconds` is
---- left out after the merge, so two five-minute meetings in a row still count
---- while a five-minute sliver of one at the edge of the gap does not.
-function M.fill(settings, from, to, events)
+--- What the calendar says, not what is left of it: an hour in a meeting is an
+--- hour in a meeting whether or not somebody typed during it. Keeping the two
+--- apart is what lets a day show both, and the arithmetic takes the union so
+--- that neither is counted twice.
+---
+--- Merged, because two meetings that run back to back are one stretch of the
+--- afternoon. Anything shorter than `minimumSeconds` is left out after the
+--- merge, so two five-minute meetings in a row still count while a sliver of
+--- one at the edge of the window does not.
+function M.wanted(settings, from, to, events)
   local pieces = {}
   for _, event in ipairs(events or {}) do
     if M.counts(settings, event) then
-      -- An event without both moments is no stretch of the day. Reading a
-      -- missing one as zero would clamp it to the start of the gap and cover
-      -- everything up to the other end.
+      -- An event without both moments is no stretch of the day.
       local begins = tonumber(event.start)
       local ends = tonumber(event.finish or event["end"])
       if begins and ends then
@@ -137,28 +139,24 @@ end
 --- reaches outside the window, since nothing here knows what the calendar says
 --- about the time around it.
 ---
+--- A meeting is written whether or not the tracker was recording through it.
+--- Somebody at the keyboard in a meeting is doing both, and a record that had
+--- to choose would be wrong about one of them. What stops the hour from being
+--- counted twice is the arithmetic, which takes the union of the hours of a
+--- class rather than their sum.
+---
 --- Nothing is written for time that has not happened: a meeting in the diary
 --- for tomorrow is not an hour anybody has worked. The window reaches forward
 --- so that what moved into it can be recognised, not so that it can be booked.
 function M.sync(settings, rows, events, from, to, now)
   local upTo = math.min(to, now)
-  local keep, current = {}, {}
+  local current = {}
   for _, row in ipairs(rows) do
-    if row.start and row.finish then
-      local inside = row.start >= from and row.finish <= to
-      if row.source == MEETING and inside then
-        current[#current + 1] = row
-      elseif row.finish > from and row.start < upTo then
-        keep[#keep + 1] = { start = row.start, finish = row.finish }
-      end
+    if row.start and row.finish and row.source == MEETING and row.start >= from and row.finish <= to then
+      current[#current + 1] = row
     end
   end
-  local wanted = {}
-  for _, hole in ipairs(M.gaps(keep, from, upTo, settings.minimumSeconds)) do
-    for _, piece in ipairs(M.fill(settings, hole.start, hole.finish, events)) do
-      wanted[#wanted + 1] = piece
-    end
-  end
+  local wanted = M.wanted(settings, from, upTo, events)
   local have, want = {}, {}
   local double = {}
   for _, row in ipairs(current) do
@@ -189,46 +187,6 @@ function M.sync(settings, rows, events, from, to, now)
     return a.start < b.start
   end)
   return add, drop
-end
-
---- The stretches of `from` to `to` that the record says nothing about, longest
---- first in time order. A gap is where the tracker was not running or nobody
---- was at the keyboard: the places a calendar can account for.
----
---- Rows arrive in the order they were written, which is not the order they
---- happened once a gap has been filled in after the fact, so they are sorted.
---- A row that overlaps the one before it moves the edge of the covered time
---- forward rather than opening a gap behind it.
-function M.gaps(rows, from, to, minimum)
-  local spans = {}
-  for _, row in ipairs(rows or {}) do
-    -- A row read from the file carries stamps; one that has already been read
-    -- carries seconds. Both are rows, and this is the one place that has to
-    -- know it.
-    local start = M.moment(row.start) or tonumber(row.start)
-    local finish = M.moment(row.finish) or tonumber(row.finish)
-    if start and finish and finish > start and finish > from and start < to then
-      spans[#spans + 1] = { start = start, finish = finish }
-    end
-  end
-  table.sort(spans, function(a, b)
-    return a.start < b.start
-  end)
-  local out = {}
-  local reach = from
-  local least = tonumber(minimum) or 0
-  for _, span in ipairs(spans) do
-    if span.start - reach >= least then
-      out[#out + 1] = { start = reach, finish = span.start }
-    end
-    if span.finish > reach then
-      reach = span.finish
-    end
-  end
-  if to - reach >= least then
-    out[#out + 1] = { start = reach, finish = to }
-  end
-  return out
 end
 
 --- The moment a written row says, as seconds.

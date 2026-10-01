@@ -32,52 +32,52 @@ describe("meetings.counts", function()
   end)
 end)
 
-describe("meetings.fill", function()
-  it("cuts a meeting to the gap at both ends", function()
-    local out = meetings.fill(SETTINGS, 1000, 2000, { event(500, 1500), event(1600, 3000) })
+describe("meetings.wanted", function()
+  it("takes the meeting as the calendar has it, not what is left of it", function()
+    -- an hour in a meeting is an hour in a meeting whether or not somebody
+    -- typed during it; the arithmetic is what keeps it from counting twice
+    local out = meetings.wanted(SETTINGS, 1000, 9000, { event(2000, 5000) })
+    assert.same({ { start = 2000, finish = 5000, seconds = 3000 } }, out)
+  end)
+
+  it("cuts a meeting to the window at both ends", function()
+    local out = meetings.wanted(SETTINGS, 1000, 2000, { event(500, 1500), event(1600, 3000) })
     assert.same({ { start = 1000, finish = 1500, seconds = 500 }, { start = 1600, finish = 2000, seconds = 400 } }, out)
   end)
 
   it("makes one stretch of meetings that run into each other", function()
-    local out = meetings.fill(SETTINGS, 0, 10000, { event(1000, 2000), event(2000, 3000), event(2500, 4000) })
-    -- what goes into the record is time, not meetings: two rows that touch
-    -- would be read as one anyway
+    local out = meetings.wanted(SETTINGS, 0, 10000, { event(1000, 2000), event(2000, 3000), event(2500, 4000) })
     assert.same({ { start = 1000, finish = 4000, seconds = 3000 } }, out)
   end)
 
   it("keeps the order the day had", function()
-    local out = meetings.fill(SETTINGS, 0, 10000, { event(5000, 6000), event(1000, 2000) })
+    local out = meetings.wanted(SETTINGS, 0, 10000, { event(5000, 6000), event(1000, 2000) })
     assert.equal(1000, out[1].start)
     assert.equal(5000, out[2].start)
   end)
 
   it("drops a sliver, and counts two short ones that add up", function()
-    -- a minute of a meeting at the edge of the gap is not worth a row
-    assert.same({}, meetings.fill(SETTINGS, 0, 60, { event(0, 3600) }))
-    -- but two five-minute meetings back to back are ten minutes of the day
-    local out = meetings.fill(SETTINGS, 0, 10000, { event(0, 300), event(300, 600) })
+    assert.same({}, meetings.wanted(SETTINGS, 0, 60, { event(0, 3600) }))
+    local out = meetings.wanted(SETTINGS, 0, 10000, { event(0, 300), event(300, 600) })
     assert.same({ { start = 0, finish = 600, seconds = 600 } }, out)
   end)
 
   it("leaves out an event that is missing a moment", function()
-    -- a start nobody wrote would otherwise be read as zero, clamped to the
-    -- start of the gap, and cover everything up to the other moment
     local broken = { status = "busy", response = "accepted", ["end"] = 9000 }
-    assert.same({}, meetings.fill(SETTINGS, 1000, 8000, { broken }))
-    assert.same({}, meetings.fill(SETTINGS, 1000, 8000, { { status = "busy", start = 2000 } }))
-    assert.same({}, meetings.fill(SETTINGS, 1000, 8000, { event("noon", 9000) }))
+    assert.same({}, meetings.wanted(SETTINGS, 1000, 8000, { broken }))
+    assert.same({}, meetings.wanted(SETTINGS, 1000, 8000, { { status = "busy", start = 2000 } }))
+    assert.same({}, meetings.wanted(SETTINGS, 1000, 8000, { event("noon", 9000) }))
   end)
 
   it("writes whole seconds, whatever the calendar answered in", function()
-    local out = meetings.fill(SETTINGS, 1000.25, 9000.75, { event(1000.25, 5000.5) })
+    local out = meetings.wanted(SETTINGS, 1000.25, 9000.75, { event(1000.25, 5000.5) })
     assert.same({ { start = 1000, finish = 5000, seconds = 4000 } }, out)
-    assert.equal(math.floor(out[1].seconds), out[1].seconds)
   end)
 
-  it("has nothing to say about a gap no meeting touches", function()
-    assert.same({}, meetings.fill(SETTINGS, 0, 100, {}))
-    assert.same({}, meetings.fill(SETTINGS, 0, 100, nil))
-    assert.same({}, meetings.fill(SETTINGS, 5000, 6000, { event(1000, 2000) }))
+  it("has nothing to say about a window no meeting touches", function()
+    assert.same({}, meetings.wanted(SETTINGS, 0, 100, {}))
+    assert.same({}, meetings.wanted(SETTINGS, 0, 100, nil))
+    assert.same({}, meetings.wanted(SETTINGS, 5000, 6000, { event(1000, 2000) }))
   end)
 end)
 
@@ -105,53 +105,6 @@ describe("meetings.moment", function()
   it("says nothing about what is no row", function()
     assert.is_nil(meetings.moment("yesterday"))
     assert.is_nil(meetings.moment(nil))
-  end)
-end)
-
-describe("meetings.gaps", function()
-  local function row(fromHour, toHour)
-    local function stamp(hour)
-      return os.date(
-        "%Y-%m-%dT%H:%M:%S%z",
-        os.time({ year = 2026, month = 9, day = 30, hour = hour, min = 0, sec = 0 })
-      )
-    end
-    return { start = stamp(fromHour), finish = stamp(toHour) }
-  end
-
-  local function hour(h)
-    return os.time({ year = 2026, month = 9, day = 30, hour = h, min = 0, sec = 0 })
-  end
-
-  it("finds what the record says nothing about", function()
-    local out = meetings.gaps({ row(8, 9), row(11, 12) }, hour(7), hour(13), 300)
-    assert.same({
-      { start = hour(7), finish = hour(8) },
-      { start = hour(9), finish = hour(11) },
-      { start = hour(12), finish = hour(13) },
-    }, out)
-  end)
-
-  it("sorts what was written out of order", function()
-    -- a gap filled in after the fact is appended, so the file is no longer in
-    -- the order the day happened
-    local out = meetings.gaps({ row(11, 12), row(8, 9) }, hour(8), hour(12), 300)
-    assert.same({ { start = hour(9), finish = hour(11) } }, out)
-  end)
-
-  it("takes a row that overlaps the one before it as cover, not as a gap", function()
-    local out = meetings.gaps({ row(8, 11), row(9, 10) }, hour(8), hour(12), 300)
-    assert.same({ { start = hour(11), finish = hour(12) } }, out)
-  end)
-
-  it("leaves out what is shorter than the least worth filling", function()
-    assert.same({}, meetings.gaps({ row(8, 9) }, hour(8), hour(9), 300))
-    local out = meetings.gaps({ row(8, 9), row(9, 10) }, hour(8), hour(10), 300)
-    assert.same({}, out)
-  end)
-
-  it("says the whole window when nothing was recorded in it", function()
-    assert.same({ { start = hour(8), finish = hour(12) } }, meetings.gaps({}, hour(8), hour(12), 300))
   end)
 end)
 
@@ -201,12 +154,13 @@ describe("meetings.sync", function()
     assert.same({}, drop)
   end)
 
-  it("leaves the hours the tracker recorded to the tracker", function()
-    -- a meeting the person sat through at the keyboard is already in the
-    -- record, and the calendar does not get to write it a second time
+  it("writes the meeting even where the tracker was recording", function()
+    -- somebody can be at the keyboard in a meeting, and both are true: the
+    -- hour is written, and the arithmetic takes the union so that it counts
+    -- once
     local rows = meetings.rows(line(9, 10, "app"))
     local add = meetings.sync(SET, rows, { meeting(9, 10) }, at(8), at(18), at(18))
-    assert.same({}, add)
+    assert.same({ { start = at(9), finish = at(10), seconds = 3600 } }, add)
   end)
 
   it("books nothing that has not happened yet", function()

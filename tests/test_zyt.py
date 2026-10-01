@@ -72,6 +72,32 @@ class SplitAndSummarise(unittest.TestCase):
         self.assertEqual(zyt.summarise([]), {"start": None, "end": None, "work": 0, "private": 0, "break": 0})
 
 
+class Union(unittest.TestCase):
+    def test_an_hour_covered_twice_is_one_hour(self):
+        day = [
+            seg("2026-09-14", "09:00", "10:00"),
+            seg("2026-09-14", "09:00", "10:00"),
+            seg("2026-09-14", "09:30", "11:00"),
+        ]
+        # somebody at the keyboard in a meeting is doing both, and both are
+        # written: two hours of the day have passed, not three and a half
+        summary = zyt.summarise(day)
+        self.assertEqual(summary["work"], 7200)
+        self.assertEqual(summary["end"].hour, 11)
+
+    def test_a_gap_between_two_covered_stretches_is_still_a_break(self):
+        day = [
+            seg("2026-09-14", "09:00", "10:00"),
+            seg("2026-09-14", "09:30", "10:30"),
+            seg("2026-09-14", "12:00", "13:00"),
+        ]
+        summary = zyt.summarise(day)
+        self.assertEqual(summary["work"], 5400 + 3600)
+        # the break is from the end of what was covered, not from the end of
+        # whichever row happened to be sorted last
+        self.assertEqual(summary["break"], 5400)
+
+
 class Capacity(unittest.TestCase):
     def test_blocks_and_breaks_inside_the_window(self):
         self.assertEqual(zyt.capacity(REPORT), 12 * 60)  # 5h + 30' + 5h + 30' + 2h
