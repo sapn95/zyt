@@ -1029,6 +1029,35 @@ function obj:fillMeetings()
   end
 end
 
+--- Zyt:fillGaps(payload)
+--- Method
+--- Fill every gap in a window, from events handed in as JSON:
+--- `{ from = seconds, to = seconds, events = { ... } }`. The command line reads
+--- the calendar and calls this, so the record keeps one writer and the whole of
+--- a week can be caught up with at once. Returns the seconds written, or -1
+--- when the payload is not one.
+function obj:fillGaps(payload)
+  local ok, body = pcall(hs.json.decode, payload)
+  if not ok or type(body) ~= "table" then
+    return -1
+  end
+  local from, to = tonumber(body.from), tonumber(body.to)
+  if not from or not to or to <= from then
+    return -1
+  end
+  if not self.rows then
+    self.rows = totals.parse(readFile(self.statePath .. "/intervals.csv"))
+  end
+  -- The gaps are worked out before the first row is written, because writing
+  -- one closes the gap it was written into.
+  local holes = meetings.gaps(self.rows, from, to, self.rules.meetings.minimumSeconds)
+  local written = 0
+  for _, hole in ipairs(holes) do
+    written = written + self:writeMeetings(hole.start, hole.finish, body.events or {})
+  end
+  return written
+end
+
 --- The rows for one gap. Kept apart from the asking, so what is written can be
 --- read without a calendar anywhere near it.
 function obj:writeMeetings(from, to, events)

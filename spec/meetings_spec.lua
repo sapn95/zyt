@@ -101,3 +101,50 @@ describe("meetings.moment", function()
     assert.is_nil(meetings.moment(nil))
   end)
 end)
+
+describe("meetings.gaps", function()
+  local function row(fromHour, toHour)
+    local function stamp(hour)
+      return os.date(
+        "%Y-%m-%dT%H:%M:%S%z",
+        os.time({ year = 2026, month = 9, day = 30, hour = hour, min = 0, sec = 0 })
+      )
+    end
+    return { start = stamp(fromHour), finish = stamp(toHour) }
+  end
+
+  local function hour(h)
+    return os.time({ year = 2026, month = 9, day = 30, hour = h, min = 0, sec = 0 })
+  end
+
+  it("finds what the record says nothing about", function()
+    local out = meetings.gaps({ row(8, 9), row(11, 12) }, hour(7), hour(13), 300)
+    assert.same({
+      { start = hour(7), finish = hour(8) },
+      { start = hour(9), finish = hour(11) },
+      { start = hour(12), finish = hour(13) },
+    }, out)
+  end)
+
+  it("sorts what was written out of order", function()
+    -- a gap filled in after the fact is appended, so the file is no longer in
+    -- the order the day happened
+    local out = meetings.gaps({ row(11, 12), row(8, 9) }, hour(8), hour(12), 300)
+    assert.same({ { start = hour(9), finish = hour(11) } }, out)
+  end)
+
+  it("takes a row that overlaps the one before it as cover, not as a gap", function()
+    local out = meetings.gaps({ row(8, 11), row(9, 10) }, hour(8), hour(12), 300)
+    assert.same({ { start = hour(11), finish = hour(12) } }, out)
+  end)
+
+  it("leaves out what is shorter than the least worth filling", function()
+    assert.same({}, meetings.gaps({ row(8, 9) }, hour(8), hour(9), 300))
+    local out = meetings.gaps({ row(8, 9), row(9, 10) }, hour(8), hour(10), 300)
+    assert.same({}, out)
+  end)
+
+  it("says the whole window when nothing was recorded in it", function()
+    assert.same({ { start = hour(8), finish = hour(12) } }, meetings.gaps({}, hour(8), hour(12), 300))
+  end)
+end)

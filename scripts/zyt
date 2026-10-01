@@ -1396,6 +1396,33 @@ def cmd_login(_args) -> int:
     return 0
 
 
+def cmd_fill(args) -> int:
+    """Catch the record up with the calendar: every gap in the last `--days`
+    that a meeting covered gets its rows. The Spoon does the writing, because
+    it owns that file; this reads the calendar and hands the events over."""
+    settings = meeting_settings(load_rules())
+    now = time.time()
+    since = now - float(args.days) * 86400
+    events = calendar_view(settings, since, now)
+    payload = json.dumps({"from": since, "to": now, "events": events})
+    # A long bracket, because the payload is JSON and holds quotes; `]==]`
+    # cannot appear in it.
+    answer = hs_call(f"return _G.zyt and tostring(_G.zyt:fillGaps([==[{payload}]==])) or 'null'", timeout=30)
+    if not answer or answer == "null":
+        print("zyt is not running in Hammerspoon (try: zyt doctor)")
+        return 1
+    try:
+        seconds = int(float(answer))
+    except ValueError:
+        print(f"the Spoon answered {answer!r}")
+        return 1
+    if seconds < 0:
+        print("the Spoon could not read what it was handed")
+        return 1
+    print(f"filled {seconds // 3600}h{seconds % 3600 // 60:02d} of meetings from the last {args.days:g} days")
+    return 0
+
+
 def cmd_meetings(args) -> int:
     settings = meeting_settings(load_rules())
     now = time.time()
@@ -1576,6 +1603,9 @@ def main(argv=None) -> int:
     meetings.add_argument("--hours", type=float, default=24, help="how far back to look (default 24)")
     meetings.add_argument("--json", action="store_true", help="print them as JSON, for the Spoon")
     meetings.set_defaults(run=cmd_meetings)
+    fill = sub.add_parser("fill", help="write the meetings of past gaps into the record")
+    fill.add_argument("--days", type=float, default=7, help="how far back to look (default 7)")
+    fill.set_defaults(run=cmd_fill)
     sub.add_parser("doctor", help="check the installation").set_defaults(run=cmd_doctor)
     args = parser.parse_args(argv)
     return args.run(args)
