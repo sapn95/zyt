@@ -25,6 +25,16 @@ booked:
 - Each day's blocks start where the real day started, rounded down to five
   minutes, and the whole day is shifted earlier when it would otherwise end
   after `latest`.
+- The first break is lunch, so it is put inside the `lunch` window rather than
+  wherever the first block happens to end. A day that started at nine broke at
+  two in the afternoon, which is not when anybody eats, and a booking has to be
+  the day somebody could have had. The morning block is still no longer than
+  `maxBlockMinutes`, and a day too short to need a break, one that starts after
+  the window has gone by, and one that starts early enough for a whole block to
+  end before lunch could begin are laid out as before. A day holding more than
+  the window can is shifted earlier as a whole, lunch with it: something has to
+  give, and a block or a break of the wrong length would be a worse lie than a
+  day that starts early.
 - What still finds no room is printed as the leftover. It is never dropped and
   never spread thinner than the rules allow.
 

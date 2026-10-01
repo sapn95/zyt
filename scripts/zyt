@@ -70,6 +70,10 @@ REPORT_DEFAULTS = {
     "latest": "20:00",
     "maxBlockMinutes": 300,
     "breakMinutes": 30,
+    # The break between two blocks is lunch, so it belongs at midday rather
+    # than wherever five hours of work happen to end. Set it to null for a day
+    # that is only blocks and breaks.
+    "lunch": {"earliest": "11:15", "latest": "13:00"},
     "defaultStart": "08:00",
     "fillEmptyDays": False,
 }
@@ -246,11 +250,57 @@ def anchor(summary: dict, report: dict) -> int:
     return min(max(at, minutes(report["earliest"])), minutes(report["latest"]))
 
 
+def latest_minute(report: dict) -> int:
+    return minutes(report["latest"])
+
+
+def lunch_end(start: int, total: int, report: dict) -> int:
+    """When the first block ends on a day that has a lunch break: inside the
+    lunch window, no longer than one block, and never past what is left to
+    book. Zero when the day cannot have one, which is a day short enough to
+    need no break, or one that starts after the window has gone by."""
+    lunch = report.get("lunch")
+    if not lunch or total <= report["maxBlockMinutes"]:
+        return 0
+    earliest, latest = minutes(lunch["earliest"]), minutes(lunch["latest"])
+    end = min(start + report["maxBlockMinutes"], latest - report["breakMinutes"])
+    morning = end - start
+    # A block is never stretched to reach the window: a day that starts early
+    # enough for a full block to end before lunch could begin keeps the
+    # ordinary layout, and so does one with nothing left for an afternoon.
+    if end < earliest or morning <= 0 or morning >= total:
+        return 0
+    # And the day has to still fit the window. A short morning pushes the rest
+    # into one block more than it would otherwise need, which is one break
+    # more, and a day that no longer fits is shifted out of the window at both
+    # ends: an earlier start than `earliest` and a lunch nowhere near midday.
+    blocks = 1 + -(-(total - morning) // report["maxBlockMinutes"])
+    needed = total + (blocks - 1) * report["breakMinutes"]
+    if needed > latest_minute(report) - minutes(report["earliest"]):
+        return 0
+    return end
+
+
 def layout(start: int, total: int, report: dict) -> list:
     """Blocks of at most maxBlockMinutes with a break between, ending no later
-    than `latest`; shifted earlier as a whole when they would."""
+    than `latest`; shifted earlier as a whole when they would.
+
+    The first break is lunch and it is put at midday, because that is when it
+    is taken. Without that it lands wherever the first block happens to end,
+    which on a day that started at nine is the middle of the afternoon.
+
+    A day holding more than the window can (blocks and breaks together) is
+    shifted earlier as a whole, lunch with it. Something has to give there, and
+    the alternative is a lunch break longer than `breakMinutes` or a booking
+    that runs past `latest`; moving the whole day keeps every block and every
+    break the length it was meant to be."""
     blocks = []
     cursor, remaining = start, total
+    midday = lunch_end(start, total, report)
+    if midday:
+        blocks.append([cursor, midday])
+        remaining -= midday - cursor
+        cursor = midday + report["breakMinutes"]
     while remaining > 0:
         block = min(report["maxBlockMinutes"], remaining)
         blocks.append([cursor, cursor + block])
@@ -1396,13 +1446,31 @@ def cmd_login(_args) -> int:
     return 0
 
 
+def first_recorded(path: Path):
+    """When the record starts, as seconds, or None when there is no row. Read
+    from the file rather than kept, because the first row is written once and
+    then never again."""
+    earliest = None
+    for segment in read_intervals(path):
+        at = segment.start.timestamp()
+        if earliest is None or at < earliest:
+            earliest = at
+    return earliest
+
+
 def cmd_fill(args) -> int:
     """Catch the record up with the calendar: every gap in the last `--days`
     that a meeting covered gets its rows. The Spoon does the writing, because
     it owns that file; this reads the calendar and hands the events over."""
     settings = meeting_settings(load_rules())
     now = time.time()
-    since = now - float(args.days) * 86400
+    if args.all:
+        since = first_recorded(STATE / "intervals.csv")
+        if since is None:
+            print("nothing recorded yet, so there is no gap to fill")
+            return 0
+    else:
+        since = now - float(args.days) * 86400
     events = calendar_view(settings, since, now)
     payload = json.dumps({"from": since, "to": now, "events": events})
     # A long bracket, because the payload is JSON and holds quotes; `]==]`
@@ -1419,7 +1487,8 @@ def cmd_fill(args) -> int:
     if seconds < 0:
         print("the Spoon could not read what it was handed")
         return 1
-    print(f"filled {seconds // 3600}h{seconds % 3600 // 60:02d} of meetings from the last {args.days:g} days")
+    span = "the whole record" if args.all else f"the last {args.days:g} days"
+    print(f"filled {seconds // 3600}h{seconds % 3600 // 60:02d} of meetings from {span}")
     return 0
 
 
@@ -1605,6 +1674,7 @@ def main(argv=None) -> int:
     meetings.set_defaults(run=cmd_meetings)
     fill = sub.add_parser("fill", help="write the meetings of past gaps into the record")
     fill.add_argument("--days", type=float, default=7, help="how far back to look (default 7)")
+    fill.add_argument("--all", action="store_true", help="every day there is a row for, back to the first")
     fill.set_defaults(run=cmd_fill)
     sub.add_parser("doctor", help="check the installation").set_defaults(run=cmd_doctor)
     args = parser.parse_args(argv)
