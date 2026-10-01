@@ -68,6 +68,12 @@ describe("meetings.fill", function()
     assert.same({}, meetings.fill(SETTINGS, 1000, 8000, { event("noon", 9000) }))
   end)
 
+  it("writes whole seconds, whatever the calendar answered in", function()
+    local out = meetings.fill(SETTINGS, 1000.25, 9000.75, { event(1000.25, 5000.5) })
+    assert.same({ { start = 1000, finish = 5000, seconds = 4000 } }, out)
+    assert.equal(math.floor(out[1].seconds), out[1].seconds)
+  end)
+
   it("has nothing to say about a gap no meeting touches", function()
     assert.same({}, meetings.fill(SETTINGS, 0, 100, {}))
     assert.same({}, meetings.fill(SETTINGS, 0, 100, nil))
