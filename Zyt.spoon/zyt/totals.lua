@@ -35,20 +35,42 @@ end
 --- Seconds per class that fall on `day` (YYYY-MM-DD). A row that runs past
 --- midnight is split: the part before it belongs to its start day, the rest
 --- to the day after, which is how the report counts too.
+--- The union of a list of `{from, to}`, in seconds. Two rows that cover the
+--- same minute are not two minutes: somebody at the keyboard in a meeting is
+--- doing both, and the record says both.
+local function union(spans)
+  table.sort(spans, function(a, b)
+    return a[1] < b[1]
+  end)
+  local total, reach = 0, nil
+  for _, span in ipairs(spans) do
+    local from, to = span[1], span[2]
+    if not reach or from > reach then
+      total = total + (to - from)
+      reach = to
+    elseif to > reach then
+      total = total + (to - reach)
+      reach = to
+    end
+  end
+  return total
+end
+
 function M.forDay(rows, day)
-  local out = { work = 0, private = 0 }
+  local spans = { work = {}, private = {} }
   for _, r in ipairs(rows) do
-    if out[r.class] then
+    if spans[r.class] then
       local startDay = r.start:sub(1, 10)
-      local untilMidnight = 86400 - clock(r.start)
+      local from = clock(r.start)
+      local untilMidnight = 86400 - from
       if startDay == day then
-        out[r.class] = out[r.class] + math.min(r.seconds, untilMidnight)
+        spans[r.class][#spans[r.class] + 1] = { from, from + math.min(r.seconds, untilMidnight) }
       elseif r.seconds > untilMidnight and M.nextDay(startDay) == day then
-        out[r.class] = out[r.class] + math.min(r.seconds - untilMidnight, 86400)
+        spans[r.class][#spans[r.class] + 1] = { 0, math.min(r.seconds - untilMidnight, 86400) }
       end
     end
   end
-  return out
+  return { work = union(spans.work), private = union(spans.private) }
 end
 
 --- 7h05 for 25500 seconds. Whole minutes; nobody books seconds.

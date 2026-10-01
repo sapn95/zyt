@@ -56,31 +56,32 @@ machine could read it for as long as that call takes. The alternative was a file
 in the state directory, readable for as long as it exists. Neither is perfect
 and the shorter window won.
 
-## Filling the gap
+## A meeting is an hour whether or not anybody typed
 
-A row is written for the stretches of a gap a meeting covered, and a gap is the
-time between the end of the last row and the start of the segment that opened
-when somebody came back. Never into that segment: the minutes after the wake are
-recorded properly, and a meeting that runs past it would otherwise be counted
-twice.
+A row is written for every meeting the calendar has, the whole of it, and not
+only for the part of it the tracker recorded nothing in. Somebody can be at the
+keyboard in a meeting: both are true, the record says both, and a record that
+had to choose would be wrong about one of them. The first version wrote only
+what was left of a meeting after the recorded hours were taken out, and a
+meeting that began at four showed up as beginning at twenty past, which is not
+when it began.
 
-It runs when they come back, on a wake or an unlock, because the gap is over
-then and both its edges stand still. Asking during the gap would mean rows
-that end at "now" and a second row for the rest of the same meeting, and the
-machine is usually asleep anyway.
+What stops the hour from being counted twice is the arithmetic. The totals take
+the union of the hours of a class rather than their sum: two rows over one hour
+are one hour, and the day is still the day. A gap between two covered stretches
+is still the break it was.
 
 What counts is a meeting that was not cancelled, is not an all-day marker, does
 not say `free`, and was not declined: a meeting turned down is somebody else's
 hour. The busy statuses that count are a rule, so `tentative` can be left out by
-whoever does not want it. Overlapping and touching stretches are merged, because
+whoever does not want it. Overlapping and touching meetings are merged, because
 the record holds time and not meetings, and what is left shorter than
-`minimumSeconds` is dropped: a sliver of a meeting at the edge of a gap is not
-an hour anybody worked.
+`minimumSeconds` is dropped.
 
-The command line does the asking in a shell of its own, so a round trip to Graph
-never holds up a tick, and the Spoon writes the rows itself. Nothing else writes
-that file: `zyt sync`, which brings a whole window into line at once, reads the
-calendar and hands the events to the Spoon rather than writing a row of its own.
+Nothing is written for time that has not happened, and nothing is written into
+the segment that is open: the minutes being recorded right now are being
+recorded properly, and a meeting still going on would otherwise get a row that
+ends at this moment and another one at the next round.
 
 ## Taking a row back out
 
@@ -93,9 +94,9 @@ taken out.
 
 Only rows whose source is `meeting` are ever removed, and only when they lie
 whole inside the window: a row reaching past its edge is about time this round
-knows nothing about. Rows the tracker wrote itself are never touched, and the
-hours it recorded are left to it, so a meeting somebody sat through at the
-keyboard is not written a second time.
+knows nothing about. Rows the tracker wrote itself are never touched, whether or
+not a meeting covers the same hour. The two say different things about it, and
+the arithmetic is where they meet.
 
 The file is written whole and renamed into place, so a reader sees either the
 old one or the new one. The Spoon is single-threaded and does this between

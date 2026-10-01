@@ -203,17 +203,37 @@ def split_by_day(segments: list) -> list:
     return out
 
 
+def covered(segments: list) -> int:
+    """The seconds a list of segments covers between them. Two that cover the
+    same minute are not two minutes: somebody at the keyboard in a meeting is
+    doing both, the record says both, and the day is still the day."""
+    total = 0
+    reach = None
+    for segment in sorted(segments, key=lambda s: s.start):
+        if reach is None or segment.start > reach:
+            total += segment.seconds
+            reach = segment.end
+        elif segment.end > reach:
+            total += int((segment.end - reach).total_seconds())
+            reach = segment.end
+    return total
+
+
 def summarise(day_segments: list) -> dict:
     work = sorted((s for s in day_segments if s.cls == "work"), key=lambda s: s.start)
-    private = sum(s.seconds for s in day_segments if s.cls == "private")
+    private = [s for s in day_segments if s.cls == "private"]
     longest_break = 0
-    for earlier, later in zip(work, work[1:]):
-        longest_break = max(longest_break, int((later.start - earlier.end).total_seconds()))
+    reach = None
+    for segment in work:
+        if reach is not None and segment.start > reach:
+            longest_break = max(longest_break, int((segment.start - reach).total_seconds()))
+        if reach is None or segment.end > reach:
+            reach = segment.end
     return {
         "start": work[0].start if work else None,
-        "end": work[-1].end if work else None,
-        "work": sum(s.seconds for s in work),
-        "private": private,
+        "end": max((s.end for s in work), default=None),
+        "work": covered(work),
+        "private": covered(private),
         "break": longest_break,
     }
 
