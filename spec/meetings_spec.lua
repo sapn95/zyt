@@ -222,3 +222,33 @@ describe("meetings.sync", function()
     assert.same({}, drop)
   end)
 end)
+
+describe("meetings.sync and a row written twice", function()
+  local function at(h)
+    return os.time({ year = 2026, month = 9, day = 29, hour = h, min = 0, sec = 0 })
+  end
+
+  local function line(fromHour, toHour, seconds)
+    local stamp = function(h)
+      return os.date("%Y-%m-%dT%H:%M:%S%z", at(h))
+    end
+    return ("%s,%s,%s,work,meeting,calendar"):format(stamp(fromHour), stamp(toHour), seconds)
+  end
+
+  it("keeps one of two rows that say the same hour", function()
+    -- the same hour written twice is the hour counted twice, and the two can
+    -- look different: one of them came from a version that wrote fractions
+    local rows = meetings.rows(line(9, 10, "3600") .. "\n" .. line(9, 10, "3600.0"))
+    local events = { { start = at(9), ["end"] = at(10), status = "busy", response = "accepted" } }
+    local add, drop = meetings.sync(
+      { statuses = { "busy" }, minimumSeconds = 300, class = "work" },
+      rows,
+      events,
+      at(8),
+      at(18),
+      at(18)
+    )
+    assert.same({}, add)
+    assert.equal(1, #drop)
+  end)
+end)
