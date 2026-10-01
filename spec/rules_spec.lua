@@ -67,6 +67,9 @@ describe("rules.normalise", function()
     assert.matches("meetings.minimumSeconds", err)
     _, err = rules.normalise({ meetings = 3 }, "/h")
     assert.matches("meetings has to be", err)
+    -- a timer asked to fire every zero seconds never stops firing
+    _, err = rules.normalise({ meetings = { syncHours = 0 } }, "/h")
+    assert.matches("meetings.syncHours", err)
   end)
 
   it("names the field that is wrong", function()

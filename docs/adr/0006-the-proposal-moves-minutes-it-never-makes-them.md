@@ -31,10 +31,12 @@ booked:
   the day somebody could have had. The morning block is still no longer than
   `maxBlockMinutes`, and a day too short to need a break, one that starts after
   the window has gone by, and one that starts early enough for a whole block to
-  end before lunch could begin are laid out as before. A day holding more than
-  the window can is shifted earlier as a whole, lunch with it: something has to
-  give, and a block or a break of the wrong length would be a worse lie than a
-  day that starts early.
+  end before lunch could begin are laid out as before. Lunch is placed against
+  the start the day ends up with rather than the one it came in with, because a
+  day that has to be pulled earlier to fit would otherwise carry its lunch out
+  of the window with it. A day that cannot hold the break the split costs keeps
+  the plain layout: the break falls where it falls, and every block and every
+  break is still the length it should be, which is the smaller lie.
 - What still finds no room is printed as the leftover. It is never dropped and
   never spread thinner than the rules allow.
 

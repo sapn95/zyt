@@ -10,6 +10,10 @@ local DECLINED = "declined"
 --- What the calendar calls time that is not taken.
 local FREE = "free"
 
+--- The source a row written from the calendar carries.
+M.SOURCE = "meeting"
+local MEETING = M.SOURCE
+
 --- Days from 1970-01-01 to a calendar date, by Howard Hinnant's civil
 --- algorithm. `os.time` would do this too, but it reads the fields as local
 --- time, and a row carries the offset it was written with.
@@ -101,6 +105,84 @@ function M.fill(settings, from, to, events)
   return out
 end
 
+--- The rows of the file as they were written, each with the line it came from,
+--- so that a file can be written back without touching a row this does not
+--- understand. The last field holds the application and may be quoted, which
+--- is why only the five before it are cut off.
+function M.rows(text)
+  local out = {}
+  for line in (text or ""):gmatch("[^\n]+") do
+    local start, finish, seconds, class, source = line:match("^([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),")
+    if start and start ~= "start" then
+      out[#out + 1] = {
+        line = line,
+        start = M.moment(start),
+        finish = M.moment(finish),
+        seconds = tonumber(seconds),
+        class = class,
+        source = source,
+      }
+    end
+  end
+  return out
+end
+
+--- What the record and the calendar disagree about in a window: the meeting
+--- rows to write, and the ones to take out.
+---
+--- The calendar is the authority for its own hours and for nothing else. A
+--- meeting that moved, was shortened or called off leaves a row behind that is
+--- no longer true, and the only way to say so is to take it out again. Rows the
+--- tracker wrote itself are never touched, and neither is a meeting row that
+--- reaches outside the window, since nothing here knows what the calendar says
+--- about the time around it.
+---
+--- Nothing is written for time that has not happened: a meeting in the diary
+--- for tomorrow is not an hour anybody has worked. The window reaches forward
+--- so that what moved into it can be recognised, not so that it can be booked.
+function M.sync(settings, rows, events, from, to, now)
+  local upTo = math.min(to, now)
+  local keep, current = {}, {}
+  for _, row in ipairs(rows) do
+    if row.start and row.finish then
+      local inside = row.start >= from and row.finish <= to
+      if row.source == MEETING and inside then
+        current[#current + 1] = row
+      elseif row.finish > from and row.start < upTo then
+        keep[#keep + 1] = { start = row.start, finish = row.finish }
+      end
+    end
+  end
+  local wanted = {}
+  for _, hole in ipairs(M.gaps(keep, from, upTo, settings.minimumSeconds)) do
+    for _, piece in ipairs(M.fill(settings, hole.start, hole.finish, events)) do
+      wanted[#wanted + 1] = piece
+    end
+  end
+  local have, want = {}, {}
+  for _, row in ipairs(current) do
+    have[row.start .. ":" .. row.finish] = row
+  end
+  for _, piece in ipairs(wanted) do
+    want[piece.start .. ":" .. piece.finish] = true
+  end
+  local add, drop = {}, {}
+  for _, piece in ipairs(wanted) do
+    if not have[piece.start .. ":" .. piece.finish] then
+      add[#add + 1] = piece
+    end
+  end
+  for key, row in pairs(have) do
+    if not want[key] then
+      drop[#drop + 1] = row
+    end
+  end
+  table.sort(drop, function(a, b)
+    return a.start < b.start
+  end)
+  return add, drop
+end
+
 --- The stretches of `from` to `to` that the record says nothing about, longest
 --- first in time order. A gap is where the tracker was not running or nobody
 --- was at the keyboard: the places a calendar can account for.
@@ -112,8 +194,11 @@ end
 function M.gaps(rows, from, to, minimum)
   local spans = {}
   for _, row in ipairs(rows or {}) do
-    local start = M.moment(row.start)
-    local finish = M.moment(row.finish)
+    -- A row read from the file carries stamps; one that has already been read
+    -- carries seconds. Both are rows, and this is the one place that has to
+    -- know it.
+    local start = M.moment(row.start) or tonumber(row.start)
+    local finish = M.moment(row.finish) or tonumber(row.finish)
     if start and finish and finish > start and finish > from and start < to then
       spans[#spans + 1] = { start = start, finish = finish }
     end

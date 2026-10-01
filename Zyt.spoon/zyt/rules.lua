@@ -27,6 +27,12 @@ M.defaults = {
     statuses = { "busy", "oof", "tentative" },
     minimumSeconds = 300,
     lookbackHours = 24,
+    -- How far the sync reaches and how often it runs. Forward as well as back,
+    -- because a meeting that moved into next week has to be recognised there
+    -- before the row it left behind can go.
+    lookbackDays = 30,
+    lookaheadDays = 60,
+    syncHours = 6,
   },
 }
 
@@ -122,6 +128,11 @@ function M.normalise(raw, home)
       return fail("meetings.%s has to be 0 or more", key)
     end
     meetings[key] = value
+  end
+  -- A timer asked to fire every zero seconds fires without stopping, and every
+  -- firing asks the calendar again.
+  if meetings.syncHours <= 0 then
+    return fail("meetings.syncHours has to be more than 0")
   end
   if not CLASSES[meetings.class] then
     return fail("meetings.class has to be work or private, not %q", tostring(meetings.class))
