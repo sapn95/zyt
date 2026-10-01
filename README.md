@@ -207,15 +207,17 @@ zyt board 2026-09-14                           # one day on its own
 zyt board --one-week --out ~/Desktop/week.html --no-open
 ```
 
-The same week, drawn instead of tabulated. Each day gets two lanes on one hour
-scale: above it what was recorded, work in blue and private in purple, below it
-the blocks the proposal would have you book. Hover a bar and it names its exact
+The same week, drawn instead of tabulated. Each day gets three lanes on one hour
+scale: the hours at the keyboard, work in blue and private in purple; the hours
+the calendar accounted for, in teal, because an hour in a meeting is work but
+not the same thing to look at; and the blocks the proposal would have you book. Hover a bar and it names its exact
 times. The scale covers the hours that may be booked and widens for anything
 outside them, so a Sunday evening shows up where it happened.
 
 ```text
             07   08   09   10   11   12   13   14   15   16   17   18
 Mon 14.09.       ████████████████████▓▓▓▓ ███████████████████     7h50 · 0h45 private
+                           ▓▓▓▓▓▓▓▓▓▓                             (in a meeting)
                  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒       08:00–13:00 · 13:30–16:20
 ```
 
