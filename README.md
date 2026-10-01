@@ -149,7 +149,9 @@ consented for you alone:
 login keychain. `zyt meetings` prints what it can see, which is the way to check
 that the sign-in and the scope are right.
 
-From then on it fills itself in. When you come back, on a wake or an unlock, the
+`zyt fill` catches the record up: every gap of the last week that a meeting
+covered gets its rows, which is how the days before you turned this on get
+their hours. From then on it fills itself in. When you come back, on a wake or an unlock, the
 Spoon asks what covered the time since the last row and writes what it finds as
 `work`, source `meeting`. It stops at the segment that opened when you came
 back, so nothing is counted twice, it leaves out what you declined, what was
@@ -260,6 +262,7 @@ says whether it does.
 | `zyt board [2026-W38\|2026-09-14]` | The same, drawn as one HTML file, and opened |
 | `zyt login` | Sign in to Microsoft Graph once, for the calendar |
 | `zyt meetings [--hours 24]` | The events it can see, `--json` for the Spoon |
+| `zyt fill [--days 7]` | Write the meetings of past gaps into the record |
 | `zyt hook claude-code` | The stdin hook for Claude Code |
 | `zyt context <source> [dir]` | Leave the same note from anything else |
 | `zyt link` · `zyt unlink` | Put the Spoon where Hammerspoon finds it, take it out |

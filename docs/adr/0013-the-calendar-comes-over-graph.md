@@ -79,7 +79,8 @@ an hour anybody worked.
 
 The command line does the asking in a shell of its own, so a round trip to Graph
 never holds up a tick, and the Spoon writes the rows itself. Nothing else writes
-that file.
+that file: `zyt fill`, which catches a whole week up at once, reads the calendar
+and hands the events to the Spoon rather than writing a row of its own.
 
 ## What was rejected
 
