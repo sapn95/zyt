@@ -83,7 +83,9 @@ class Layout(unittest.TestCase):
     def test_a_day_that_fits_keeps_its_own_start(self):
         summary = {"start": at("2026-09-14", "08:02")}
         blocks = zyt.layout(zyt.anchor(summary, REPORT), 7 * 60 + 55, REPORT)
-        self.assertEqual(blocks, [[8 * 60, 13 * 60], [13 * 60 + 30, 16 * 60 + 25]])
+        # the break is lunch, so the morning ends at the late end of the lunch
+        # window rather than five hours after the day began
+        self.assertEqual(blocks, [[8 * 60, 12 * 60 + 30], [13 * 60, 16 * 60 + 25]])
 
     def test_a_late_day_is_moved_earlier_as_a_whole(self):
         summary = {"start": at("2026-09-14", "14:00")}
@@ -398,6 +400,70 @@ class Calendar(unittest.TestCase):
         self.assertIn("zyt login", str(told.exception))
 
 
+class Lunch(unittest.TestCase):
+    def report(self, **over):
+        report = dict(zyt.REPORT_DEFAULTS)
+        report.update(over)
+        return report
+
+    def blocks(self, start, total, **over):
+        return [
+            f"{s // 60:02d}:{s % 60:02d}-{e // 60:02d}:{e % 60:02d}"
+            for s, e in zyt.layout(start, total, self.report(**over))
+        ]
+
+    def test_the_break_is_taken_at_midday(self):
+        # a day that started at nine used to break in the middle of the
+        # afternoon, because the break fell wherever the first block ended
+        self.assertEqual(self.blocks(9 * 60, 470, breakMinutes=60), ["09:00-12:00", "13:00-17:50"])
+        self.assertEqual(self.blocks(7 * 60 + 30, 510, breakMinutes=60), ["07:30-12:00", "13:00-17:00"])
+
+    def test_a_block_is_never_stretched_to_reach_the_window(self):
+        # four hours from seven ends at eleven, before lunch could start, and
+        # the block keeps its length rather than growing to 11:15
+        blocks = zyt.layout(7 * 60, 600, self.report(breakMinutes=60, maxBlockMinutes=240))
+        self.assertEqual(blocks[0][1] - blocks[0][0], 240)
+        for start, end in blocks:
+            self.assertLessEqual(end - start, 240)
+
+    def test_a_morning_too_short_to_pay_for_itself_is_not_taken(self):
+        # a day that starts at noon would have a half-hour morning, and the
+        # rest would need one block more than the day was measured for: one
+        # break more than the window was given, and the whole day pushed out of
+        # it. The ordinary layout holds instead.
+        report = self.report()
+        blocks = zyt.layout(12 * 60, 720, report)
+        self.assertGreaterEqual(blocks[0][0], zyt.minutes(report["earliest"]))
+        self.assertEqual(blocks[-1][1], zyt.minutes(report["latest"]))
+        self.assertEqual(sum(end - start for start, end in blocks), 720)
+
+    def test_a_day_that_cannot_fit_the_window_is_moved_as_a_whole(self):
+        # twelve hours of work and two breaks need more than the window holds,
+        # so something has to give: every block and every break keeps its
+        # length, the day ends at the latest hour, and lunch moves with it
+        report = self.report(breakMinutes=60)
+        blocks = zyt.layout(9 * 60, 720, report)
+        self.assertEqual(sum(end - start for start, end in blocks), 720)
+        self.assertEqual(blocks[-1][1], zyt.minutes(report["latest"]))
+        for first, second in zip(blocks, blocks[1:]):
+            self.assertEqual(second[0] - first[1], 60)
+
+    def test_a_day_with_no_room_for_one_keeps_its_shape(self):
+        # short enough to need no break at all
+        self.assertEqual(self.blocks(8 * 60, 240), ["08:00-12:00"])
+        # and a day that starts after the window has gone by, which is then
+        # pulled back as a whole because it would run past the latest hour
+        self.assertEqual(self.blocks(13 * 60 + 30, 420, breakMinutes=60), ["12:00-17:00", "18:00-20:00"])
+
+    def test_without_a_lunch_window_it_is_as_it_was(self):
+        self.assertEqual(self.blocks(9 * 60, 470, breakMinutes=60, lunch=None), ["09:00-14:00", "15:00-17:50"])
+
+    def test_every_booked_minute_is_still_in_a_block(self):
+        for total in (60, 300, 301, 470, 600, 780):
+            blocks = zyt.layout(9 * 60, total, self.report(breakMinutes=60))
+            self.assertEqual(sum(end - start for start, end in blocks), total)
+
+
 class Rules(unittest.TestCase):
     def test_defaults_without_a_file_and_the_report_merged_over_them(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -522,7 +588,7 @@ class Board(unittest.TestCase):
         page = zyt.render_board([drawn], "Week 2026-W38")
         self.assertTrue(page.startswith("<!doctype html>"))
         self.assertIn('title="work 09:00 to 17:00, 8h00"', page)  # the recorded lane
-        self.assertIn('title="book 09:00 to 14:00, 5h00"', page)  # and the proposal below it
+        self.assertIn('title="book 09:00 to 12:30, 3h30"', page)  # and the proposal below it
         self.assertIn("moved to the workdays", page)
         for absent in ("<script", "http", "<img"):
             self.assertNotIn(absent, page)
