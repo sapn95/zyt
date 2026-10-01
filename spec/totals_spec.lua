@@ -41,3 +41,16 @@ describe("totals", function()
     assert.equals("0h00", totals.format(-5))
   end)
 end)
+
+describe("totals.forDay and two rows over one hour", function()
+  it("counts an hour once, however many rows cover it", function()
+    local rows = {
+      { start = "2026-09-30T09:00:00+02:00", finish = "2026-09-30T10:00:00+02:00", seconds = 3600, class = "work" },
+      { start = "2026-09-30T09:00:00+02:00", finish = "2026-09-30T10:00:00+02:00", seconds = 3600, class = "work" },
+      { start = "2026-09-30T09:30:00+02:00", finish = "2026-09-30T11:00:00+02:00", seconds = 5400, class = "work" },
+    }
+    -- somebody at the keyboard in a meeting is doing both, and both are
+    -- written; two hours of the day have passed, not three and a half
+    assert.equal(7200, totals.forDay(rows, "2026-09-30").work)
+  end)
+end)

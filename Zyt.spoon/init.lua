@@ -238,6 +238,10 @@ local MAX_CHAT_CHOICES = 8
 -- worst, in a file of 37 MB, always within a hundred bytes of the newest name
 -- the tool made up. A quarter of a megabyte is that with room to spare, and a
 -- name that fell out of it would come back on the next exchange.
+-- The least time between two rounds of asking the calendar, however often
+-- something asks for one.
+local SYNC_FLOOR = 300
+
 local TRANSCRIPT_TAIL = 256 * 1024
 local TITLE_SECONDS = 300
 
@@ -961,17 +965,6 @@ end
 -- ---------------------------------------------------------------------------
 -- The calendar
 
---- The end of the last row written, as seconds. Where the record stops is
---- where a gap starts, and the file is the only thing that knows it across a
---- restart.
-function obj:lastRecorded()
-  if not self.rows then
-    self.rows = totals.parse(readFile(self.statePath .. "/intervals.csv"))
-  end
-  local last = self.rows[#self.rows]
-  return last and meetings.moment(last.finish) or nil
-end
-
 --- Ask the calendar about the whole window and bring the record into line with
 --- it. Every `syncHours` and once shortly after a start, because a meeting that
 --- was called off or moved leaves a row behind that is no longer true and
@@ -981,8 +974,15 @@ function obj:syncWindow()
   if not self.running or not settings.enabled or self.syncing then
     return
   end
-  self.syncing = true
   local now = os.time()
+  -- An unlock is a reason to ask, and a screen unlocked twenty times in an
+  -- afternoon is not twenty reasons. The timer is what keeps the window
+  -- current; this only stops the asking from following every lock.
+  if self.syncedAt and now - self.syncedAt < SYNC_FLOOR then
+    return
+  end
+  self.syncedAt = now
+  self.syncing = true
   local from = now - settings.lookbackDays * 86400
   local to = now + settings.lookaheadDays * 86400
   local command = ("%q meetings --json --from %d --to %d"):format(self.cli, from, to)
@@ -1007,63 +1007,6 @@ function obj:syncWindow()
   end, { "-lc", command })
   if not task:start() then
     self.syncing = false
-    self.logger.e("zyt meetings could not be started")
-  end
-end
-
---- The hours the calendar can account for and the tracker cannot: a meeting
---- sat through with the notebook shut, or in a room with it open and
---- untouched, where the idle rule ended the segment at the last keystroke.
----
---- Run when somebody comes back, because the gap is over then and its edges
---- stand still. The command line does the asking, in a shell of its own, so a
---- round trip to Graph never holds up a tick. What comes back is clipped to
---- the gap, so nothing is written over time that was recorded properly.
-function obj:fillMeetings()
-  local settings = self.rules.meetings
-  if not settings.enabled or self.filling then
-    return
-  end
-  local from = self:lastRecorded()
-  if not from then
-    return
-  end
-  -- Up to the open segment, never into it: the segment that started when they
-  -- came back is the same time, recorded properly.
-  local now = os.time()
-  local to = (self.state and self.state.open and self.state.open.start) or now
-  local floor = now - settings.lookbackHours * 3600
-  if from < floor then
-    from = floor
-  end
-  if to - from < settings.minimumSeconds then
-    return
-  end
-  self.filling = true
-  -- Standard error stays where it is. The command line says on it what it left
-  -- out and why, and folded into the answer it would be a line of JSON that is
-  -- not JSON.
-  local command = ("%q meetings --json --hours %d"):format(self.cli, settings.lookbackHours)
-  local task = hs.task.new("/bin/zsh", function(code, out, err)
-    self.filling = false
-    if code ~= 0 then
-      self.logger.e("zyt meetings: " .. tostring(err ~= "" and err or out))
-      return
-    end
-    if err and err ~= "" then
-      self.logger.w("zyt meetings: " .. err)
-    end
-    local ok, answer = pcall(hs.json.decode, out)
-    if not ok or type(answer) ~= "table" then
-      self.logger.e("zyt meetings said something that is not JSON")
-      return
-    end
-    self:writeMeetings(from, to, answer.events or {})
-  end, { "-lc", command })
-  if not task:start() then
-    -- Nothing will call the callback, so the flag has to come back here or the
-    -- next gap is never looked at.
-    self.filling = false
     self.logger.e("zyt meetings could not be started")
   end
 end
@@ -1132,29 +1075,6 @@ function obj:syncMeetings(payload)
     self:refresh()
   end
   return ("%d %d"):format(written, removed)
-end
-
---- The rows for one gap. Kept apart from the asking, so what is written can be
---- read without a calendar anywhere near it.
-function obj:writeMeetings(from, to, events)
-  local settings = self.rules.meetings
-  local written = 0
-  for _, piece in ipairs(meetings.fill(settings, from, to, events)) do
-    self:append({
-      start = clock.iso(piece.start),
-      finish = clock.iso(piece.finish),
-      seconds = piece.seconds,
-      class = settings.class,
-      source = "meeting",
-      app = "calendar",
-    })
-    written = written + piece.seconds
-  end
-  if written > 0 then
-    self.logger.i(("filled %d s of meetings"):format(written))
-    self:refresh()
-  end
-  return written
 end
 
 -- ---------------------------------------------------------------------------
@@ -1409,14 +1329,14 @@ function obj:watch()
       self.override = nil
       self.said = {}
       self:tick()
-      self:fillMeetings()
+      self:syncWindow()
     elseif event == W.systemWillSleep then
       self.asleep = true
       self:closeNow()
     elseif event == W.systemDidWake then
       self.asleep = false
       self:tick()
-      self:fillMeetings()
+      self:syncWindow()
     end
   end)
   self.watcher:start()
