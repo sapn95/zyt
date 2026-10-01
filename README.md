@@ -140,10 +140,19 @@ consented for you alone:
   "clientId": "<your app>",
   "class": "work",
   "statuses": ["busy", "oof", "tentative"],
+  "skipSubjects": ["social event", "team event"],
   "minimumSeconds": 300,
   "lookbackHours": 24
 }
 ```
+
+`skipSubjects` is for the hours that are in the diary because people are in the
+same room rather than because anybody is working: a team event, a drink, a
+social evening. Each entry is text to find inside the subject, case ignored.
+The subject is read to make that decision and goes no further: what is handed
+on is times and a status, and nothing that says what a meeting was about
+reaches the record, the Spoon or the screen. `zyt meetings` says how many it
+left out and not which.
 
 `zyt login` signs in once, in the browser, and keeps the refresh token in the
 login keychain. `zyt meetings` prints what it can see, which is the way to check

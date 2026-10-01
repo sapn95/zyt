@@ -291,8 +291,10 @@ class Calendar(unittest.TestCase):
         self.assertEqual(seen["auth"], "Bearer a-token")
         # the times are read as UTC, so the answer is pinned to it
         self.assertEqual(seen["prefer"], 'outlook.timezone="UTC"')
-        # the subject and the attendees are not asked for, so they cannot leak
-        for field in ("subject", "attendees", "body", "location"):
+        # the subject is asked for, because `skipSubjects` decides on it, and
+        # it goes no further than that decision
+        self.assertNotIn("subject", json.dumps(events))
+        for field in ("attendees", "body", "location"):
             self.assertNotIn(field, seen["url"])
 
     def test_every_page_of_a_long_window_is_read(self):
@@ -400,6 +402,58 @@ class Calendar(unittest.TestCase):
         self.assertEqual(exchanged.get("code"), "the-code")
         self.assertEqual(exchanged.get("grant_type"), "authorization_code")
         self.assertEqual(stored, {"client": "a-refresh-token"})
+
+    def test_a_subject_on_the_skip_list_never_becomes_an_hour(self):
+        settings = self.settings(skipSubjects=["social event", "bier"])
+        self.assertTrue(zyt.skipped(settings, "CON & Friends Social Event"))
+        self.assertTrue(zyt.skipped(settings, "Feierabendbier"))
+        self.assertFalse(zyt.skipped(settings, "Architecture board"))
+        self.assertFalse(zyt.skipped(settings, None))
+        # an empty list is no list, and nothing is skipped by accident
+        self.assertFalse(zyt.skipped(self.settings(), "CON & Friends Social Event"))
+
+    def test_the_skipped_events_are_counted_and_never_named(self):
+        answer = json.dumps(
+            {
+                "value": [
+                    {
+                        "start": {"dateTime": "2026-09-30T08:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-09-30T09:00:00.0000000", "timeZone": "UTC"},
+                        "showAs": "busy",
+                        "subject": "CON & Friends Social Event",
+                    },
+                    {
+                        "start": {"dateTime": "2026-09-30T10:00:00.0000000", "timeZone": "UTC"},
+                        "end": {"dateTime": "2026-09-30T11:00:00.0000000", "timeZone": "UTC"},
+                        "showAs": "busy",
+                        "subject": "Architecture board",
+                    },
+                ]
+            }
+        ).encode()
+
+        class Fake:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def read(self):
+                return answer
+
+        with (
+            mock.patch.object(zyt.urllib.request, "urlopen", lambda *_a, **_kw: Fake()),
+            contextlib.redirect_stderr(io.StringIO()) as said,
+        ):
+            events = zyt.calendar_view(
+                self.settings(skipSubjects=["social event"]), 1790000000, 1790003600, token="a-token"
+            )
+        self.assertEqual(len(events), 1)
+        self.assertEqual(json.dumps(events).count("subject"), 0)
+        # it says how many it left out and not a word about what they were
+        self.assertIn("1 event left out", said.getvalue())
+        self.assertNotIn("Social", said.getvalue())
 
     def test_the_newest_refresh_token_is_the_one_kept(self):
         stored = {"client": "old-refresh"}

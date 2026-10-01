@@ -36,11 +36,19 @@ recurrence rule, and the occurrence that fell on Tuesday is not in it.
 `calendarView` takes a window and hands back the occurrences inside it, which is
 the question being asked.
 
-**What is asked for.** `start`, `end`, `isAllDay`, `showAs`, `responseStatus`
-and `isCancelled`. No subject, no attendees, no body, no location: the tracker
-needs to know that there was a meeting and when, and a subject line would be the
-one thing it stored that somebody could be sorry about. The `$select` is the
-enforcement, and a test pins it.
+**What is asked for.** `start`, `end`, `isAllDay`, `showAs`, `responseStatus`,
+`isCancelled` and `subject`. No attendees, no body, no location.
+
+The subject is there for one decision and goes no further. Some hours are in the
+diary because people are in the same room and not because anybody is working: a
+team event, a drink, a social evening. Nothing but the subject says so, and the
+alternative was to have the person decline those meetings or mark them free in
+Outlook to keep a tracker happy, which is a tool asking somebody to lie to their
+colleagues. So `skipSubjects` holds the text that means "not work", the subject
+is matched against it, and what leaves that function is times and a status.
+Nothing that says what a meeting was about reaches the record, the Spoon or the
+screen; `zyt meetings` reports how many events were left out and not which. Two
+tests hold that line.
 
 **How it signs in.** The app registration is the one the Graph MCP server
 already uses, a single-tenant public client with the reader assigned and the
