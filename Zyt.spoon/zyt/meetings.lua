@@ -160,13 +160,21 @@ function M.sync(settings, rows, events, from, to, now)
     end
   end
   local have, want = {}, {}
+  local double = {}
   for _, row in ipairs(current) do
-    have[row.start .. ":" .. row.finish] = row
+    local key = row.start .. ":" .. row.finish
+    if have[key] then
+      -- The same hour written twice is the hour counted twice. One of them is
+      -- the row; the rest go, whatever the calendar says about that time.
+      double[#double + 1] = row
+    else
+      have[key] = row
+    end
   end
   for _, piece in ipairs(wanted) do
     want[piece.start .. ":" .. piece.finish] = true
   end
-  local add, drop = {}, {}
+  local add, drop = {}, double
   for _, piece in ipairs(wanted) do
     if not have[piece.start .. ":" .. piece.finish] then
       add[#add + 1] = piece
