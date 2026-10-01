@@ -1033,13 +1033,12 @@ function obj:syncMeetings(payload)
   end
   local path = self.statePath .. "/intervals.csv"
   local rows = meetings.rows(readFile(path))
-  -- The segment that is open is not in the file yet, and the time it covers is
-  -- being recorded properly. A round that did not know about it would write a
-  -- meeting over the hour somebody is sitting in at the keyboard, and give a
-  -- meeting still going on a row ending now that the next round would replace.
-  local open = self.state and self.state.open
-  local upTo = (open and open.start) or os.time()
-  local add, drop = meetings.sync(self.rules.meetings, rows, body.events or {}, from, to, upTo)
+  -- Up to now, and no further. The segment that is open covers the same
+  -- minutes from the other side, and that is not a reason to stop: a meeting
+  -- somebody is sitting in at the keyboard is still a meeting, and the totals
+  -- take the union. A meeting still going on gets the part of it that has
+  -- happened, and the next round writes the rest.
+  local add, drop = meetings.sync(self.rules.meetings, rows, body.events or {}, from, to, os.time())
   local removed = 0
   if #drop > 0 then
     local gone = {}
