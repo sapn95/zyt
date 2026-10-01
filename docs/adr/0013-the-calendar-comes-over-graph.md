@@ -78,10 +78,10 @@ whoever does not want it. Overlapping and touching meetings are merged, because
 the record holds time and not meetings, and what is left shorter than
 `minimumSeconds` is dropped.
 
-Nothing is written for time that has not happened, and nothing is written into
-the segment that is open: the minutes being recorded right now are being
-recorded properly, and a meeting still going on would otherwise get a row that
-ends at this moment and another one at the next round.
+Nothing is written for time that has not happened. A meeting that is still
+going on gets the part of it that has, and the next round writes the rest: the
+row is replaced rather than added to, which is the same mechanism a meeting that
+moved goes through.
 
 ## Taking a row back out
 
