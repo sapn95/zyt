@@ -30,6 +30,10 @@ on:
   # The daily catch-up, see the `reconcile` job.
   schedule:
     - cron: '23 5 * * *'
+  # The same catch-up on demand. A pull request that the sweep leaves open
+  # needs looking at, and waiting until the next 05:23 to see whether a change
+  # helped is a slow way to find out.
+  workflow_dispatch:
 
 # One poll per pull request: a new push supersedes the running job rather than
 # racing it.
@@ -53,6 +57,11 @@ jobs:
       contents: write # to merge
       pull-requests: write # `gh pr merge` needs it alongside contents
       checks: read # `gh pr checks` reads the rollup
+      # `--json workflow` resolves each check run's workflow, which lives
+      # behind the actions scope. Without this the rollup query comes back
+      # denied, the filter below reads nothing, and every pull request stays
+      # open for ever with nothing in the summary to say why.
+      actions: read
     steps:
       # Anyone with push access can add a commit to a Dependabot branch, and
       # that commit would then ride into main on Dependabot's ticket. So check
@@ -119,10 +128,18 @@ jobs:
             # one of those would be waved through. $GITHUB_WORKFLOW is this
             # workflow's own name, so renaming it does not quietly break the
             # match.
-            others="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket \
-              | jq --arg wf "$GITHUB_WORKFLOW" '
+            # `gh pr checks` exits non-zero whenever a check is red or still
+            # running, which is an ordinary answer here, so the fetch and the
+            # filter are two steps: only jq failing means the rollup itself
+            # could not be read. Swallowing that silently is how a pull request
+            # sits open for twelve days with a green summary.
+            rollup="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket || true)"
+            if ! others="$(jq --arg wf "$GITHUB_WORKFLOW" '
               [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                    | select(.bucket != "pass" and .bucket != "skipping") ] | length' || true)"
+                    | select(.bucket != "pass" and .bucket != "skipping") ] | length' <<<"$rollup")"; then
+              echo "::warning::Could not read the checks on this pull request — leaving it open."
+              others=""
+            fi
             case "$state" in
               CLEAN | UNSTABLE)
                 # Mergeable. CLEAN vouches for the required checks and UNSTABLE
@@ -147,10 +164,10 @@ jobs:
             # BLOCKED means both "a required check has not finished" and "one
             # of them failed", so ask the checks themselves whether anything is
             # already red rather than polling a lost cause for half an hour.
-            failed="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket \
-              | jq --arg wf "$GITHUB_WORKFLOW" '
+            rollup="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket || true)"
+            failed="$(jq --arg wf "$GITHUB_WORKFLOW" '
               [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                    | select(.bucket == "fail") ] | length' || true)"
+                    | select(.bucket == "fail") ] | length' <<<"$rollup" || true)"
             if [ -n "$failed" ] && [ "$failed" != "0" ]; then
               echo "::notice::$failed check(s) red on this commit — leaving the pull request open."
               echo "green=false" >> "$GITHUB_OUTPUT"
@@ -180,13 +197,14 @@ jobs:
   # here.
   reconcile:
     name: reconcile
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
       checks: read
+      actions: read # see the auto-merge job
     steps:
       - name: merge every Dependabot pull request that is already green
         env:
@@ -220,10 +238,15 @@ jobs:
             # CLEAN and UNSTABLE both defer to the rollup — see the same
             # reasoning in the auto-merge job above.
             if [ "$state" = 'CLEAN' ] || [ "$state" = 'UNSTABLE' ]; then
-              others="$(gh pr checks "$pr" --repo "$REPO" --json name,workflow,bucket </dev/null \
-                | jq --arg wf "$GITHUB_WORKFLOW" '
+              # Two steps and a warning on failure, for the reasons given in
+              # the auto-merge job.
+              rollup="$(gh pr checks "$pr" --repo "$REPO" --json name,workflow,bucket </dev/null || true)"
+              if ! others="$(jq --arg wf "$GITHUB_WORKFLOW" '
                 [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                      | select(.bucket != "pass" and .bucket != "skipping") ] | length' || true)"
+                      | select(.bucket != "pass" and .bucket != "skipping") ] | length' <<<"$rollup")"; then
+                echo "::warning::PR #$pr: could not read the checks — left open."
+                others=""
+              fi
               [ "${others:-1}" = "0" ] && state=READY
             fi
             if [ "$state" = 'READY' ]; then
