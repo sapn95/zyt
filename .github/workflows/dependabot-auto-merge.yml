@@ -138,9 +138,18 @@ jobs:
             # be cleared rather than captured: an error object would reach jq
             # as if it were the answer.
             if ! ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$SHA&per_page=100" \
-              --jq '[.workflow_runs[].check_suite_id]')"; then ours=""; fi
-            if ! runs="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')"; then runs=""; fi
-            if ! statuses="$(gh api "repos/$REPO/commits/$SHA/status" --jq '.statuses')"; then statuses=""; fi
+              --jq '[.workflow_runs[].check_suite_id]')"; then
+              ours=""
+              echo "::warning::workflow runs for $wf_file could not be read."
+            fi
+            if ! runs="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')"; then
+              runs=""
+              echo "::warning::check runs on $SHA could not be read."
+            fi
+            if ! statuses="$(gh api "repos/$REPO/commits/$SHA/status" --jq '.statuses')"; then
+              statuses=""
+              echo "::warning::commit statuses on $SHA could not be read."
+            fi
             # A check run is through once it has finished with a conclusion
             # that is not a complaint. Still running, and cancelled, both hold
             # the pull request open rather than being waved past.
@@ -265,10 +274,19 @@ jobs:
               wf_file="${GITHUB_WORKFLOW_REF%%@*}"
               wf_file="${wf_file##*/}"
               if ! ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$sha&per_page=100" \
-                --jq '[.workflow_runs[].check_suite_id]' </dev/null)"; then ours=""; fi
+                --jq '[.workflow_runs[].check_suite_id]' </dev/null)"; then
+                ours=""
+                echo "::warning::PR #$pr: workflow runs for $wf_file could not be read."
+              fi
               if ! runs="$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" \
-                --jq '.check_runs' </dev/null)"; then runs=""; fi
-              if ! statuses="$(gh api "repos/$REPO/commits/$sha/status" --jq '.statuses' </dev/null)"; then statuses=""; fi
+                --jq '.check_runs' </dev/null)"; then
+                runs=""
+                echo "::warning::PR #$pr: check runs on $sha could not be read."
+              fi
+              if ! statuses="$(gh api "repos/$REPO/commits/$sha/status" --jq '.statuses' </dev/null)"; then
+                statuses=""
+                echo "::warning::PR #$pr: commit statuses on $sha could not be read."
+              fi
               if unhappy="$(jq -nr --argjson ours "${ours:-}" --argjson runs "${runs:-}" \
                 --argjson statuses "${statuses:-}" '
                 def runstate:
