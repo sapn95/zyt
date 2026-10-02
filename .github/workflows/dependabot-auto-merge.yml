@@ -103,6 +103,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           for _ in $(seq 1 110); do   # ~30 min, inside the job timeout
@@ -111,41 +112,60 @@ jobs:
             # retried until the daily sweep.
             state="$(gh pr view "$PR" --repo "$REPO" --json mergeStateStatus \
               --jq .mergeStateStatus || echo UNKNOWN)"
-            # Everything that is not this workflow's own two jobs. They are
-            # check runs on the same commit, and the one doing the waiting can
-            # never be green before it merges — so a pull request whose only
-            # unhappy check is this job is a pull request that is ready.
-            # bucket, not state: state is whatever GitHub happens to call it,
-            # and it does not call it one thing — a check run and a commit
-            # status posted by an app report different words for the same idea.
-            # bucket is gh's own normalisation into pass / fail / pending /
-            # skipping / cancel, which is the question being asked here. Only
-            # pass and skipping count as through, so a cancelled check holds
-            # the pull request open rather than being waved past.
+            # The rollup over REST, not over `gh pr checks`. That command asks
+            # GraphQL for each check run's workflow run and for every app's
+            # commit status, and in a private repository GITHUB_TOKEN is denied
+            # both: this workflow was answered with 220 denials per run before
+            # it was granted `actions: read`, and with one afterwards, for
+            # CodeRabbit's status. A denied query prints nothing, and nothing
+            # counted as "no check is unhappy" would merge on an answer that
+            # was never given. These two endpoints ask the same question with
+            # permissions the job already has.
             #
-            # And whose check: excluding by name alone would also skip a check
-            # called auto-merge that belongs to some other workflow, and a red
-            # one of those would be waved through. $GITHUB_WORKFLOW is this
-            # workflow's own name, so renaming it does not quietly break the
-            # match.
-            # `gh pr checks` exits non-zero whenever a check is red or still
-            # running, which is an ordinary answer here, so the fetch and the
-            # filter are two steps: only jq failing means the rollup itself
-            # could not be read. Swallowing that silently is how a pull request
-            # sits open for twelve days with a green summary.
-            rollup="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket || true)"
-            if ! others="$(jq --arg wf "$GITHUB_WORKFLOW" '
-              [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                    | select(.bucket != "pass" and .bucket != "skipping") ] | length' <<<"$rollup")"; then
-              echo "::warning::Could not read the checks on this pull request — leaving it open."
-              others=""
+            # Whose check: a check run names its check suite, and this
+            # workflow's own runs on this commit name theirs, so our two jobs
+            # are excluded by identity. Excluding by name alone would also skip
+            # a check called auto-merge belonging to some other workflow, and a
+            # red one of those would be waved through. The waiting job can
+            # never be green before it merges, so a pull request whose only
+            # unhappy check is this one is a pull request that is ready.
+            wf_file="${GITHUB_WORKFLOW_REF##*/}"
+            wf_file="${wf_file%%@*}"
+            ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$SHA&per_page=100" \
+              --jq '[.workflow_runs[].check_suite_id]' || true)"
+            runs="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs' || true)"
+            statuses="$(gh api "repos/$REPO/commits/$SHA/status" --jq '.statuses' || true)"
+            # A check run is through once it has finished with a conclusion
+            # that is not a complaint. Still running, and cancelled, both hold
+            # the pull request open rather than being waved past.
+            if counts="$(jq -nr --argjson ours "${ours:-}" --argjson runs "${runs:-}" \
+              --argjson statuses "${statuses:-}" '
+              def runstate:
+                if .status != "completed" then "pending"
+                elif (.conclusion | IN("success", "neutral", "skipped")) then "pass"
+                elif (.conclusion | IN("failure", "timed_out", "action_required", "startup_failure"))
+                then "fail"
+                else "pending" end;
+              def statusstate:
+                if .state == "success" then "pass"
+                elif (.state | IN("failure", "error")) then "fail"
+                else "pending" end;
+              [ ($runs[] | select([.check_suite.id] | inside($ours) | not) | runstate),
+                ($statuses[] | statusstate) ]
+              | "\((map(select(. != "pass")) | length)) \((map(select(. == "fail")) | length))"')"; then
+              unhappy="${counts%% *}"
+              failed="${counts##* }"
+            else
+              echo "::warning::Could not read the checks on this commit — leaving the pull request open."
+              unhappy=""
+              failed=""
             fi
             case "$state" in
               CLEAN | UNSTABLE)
                 # Mergeable. CLEAN vouches for the required checks and UNSTABLE
                 # for even less, so both wait for the rollup: merge only when
                 # nothing but this job is still unhappy.
-                if [ "${others:-1}" = "0" ]; then
+                if [ "${unhappy:-1}" = "0" ]; then
                   echo "green=true" >> "$GITHUB_OUTPUT"
                   exit 0
                 fi
@@ -162,12 +182,8 @@ jobs:
                 ;;
             esac
             # BLOCKED means both "a required check has not finished" and "one
-            # of them failed", so ask the checks themselves whether anything is
-            # already red rather than polling a lost cause for half an hour.
-            rollup="$(gh pr checks "$PR" --repo "$REPO" --json name,workflow,bucket || true)"
-            failed="$(jq --arg wf "$GITHUB_WORKFLOW" '
-              [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                    | select(.bucket == "fail") ] | length' <<<"$rollup" || true)"
+            # of them failed", so read the count taken above rather than
+            # polling a lost cause for half an hour.
             if [ -n "$failed" ] && [ "$failed" != "0" ]; then
               echo "::notice::$failed check(s) red on this commit — leaving the pull request open."
               echo "green=false" >> "$GITHUB_OUTPUT"
@@ -238,16 +254,34 @@ jobs:
             # CLEAN and UNSTABLE both defer to the rollup — see the same
             # reasoning in the auto-merge job above.
             if [ "$state" = 'CLEAN' ] || [ "$state" = 'UNSTABLE' ]; then
-              # Two steps and a warning on failure, for the reasons given in
-              # the auto-merge job.
-              rollup="$(gh pr checks "$pr" --repo "$REPO" --json name,workflow,bucket </dev/null || true)"
-              if ! others="$(jq --arg wf "$GITHUB_WORKFLOW" '
-                [ .[] | select((.workflow == $wf and (.name == "auto-merge" or .name == "reconcile")) | not)
-                      | select(.bucket != "pass" and .bucket != "skipping") ] | length' <<<"$rollup")"; then
+              # The same REST rollup as the auto-merge job, for the same
+              # reasons — the reasoning is written out there.
+              wf_file="${GITHUB_WORKFLOW_REF##*/}"
+              wf_file="${wf_file%%@*}"
+              ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$sha&per_page=100" \
+                --jq '[.workflow_runs[].check_suite_id]' </dev/null || true)"
+              runs="$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" \
+                --jq '.check_runs' </dev/null || true)"
+              statuses="$(gh api "repos/$REPO/commits/$sha/status" --jq '.statuses' </dev/null || true)"
+              if unhappy="$(jq -nr --argjson ours "${ours:-}" --argjson runs "${runs:-}" \
+                --argjson statuses "${statuses:-}" '
+                def runstate:
+                  if .status != "completed" then "pending"
+                  elif (.conclusion | IN("success", "neutral", "skipped")) then "pass"
+                  elif (.conclusion | IN("failure", "timed_out", "action_required", "startup_failure"))
+                  then "fail"
+                  else "pending" end;
+                def statusstate:
+                  if .state == "success" then "pass"
+                  elif (.state | IN("failure", "error")) then "fail"
+                  else "pending" end;
+                [ ($runs[] | select([.check_suite.id] | inside($ours) | not) | runstate),
+                  ($statuses[] | statusstate) ]
+                | map(select(. != "pass")) | length')"; then
+                [ "$unhappy" = "0" ] && state=READY
+              else
                 echo "::warning::PR #$pr: could not read the checks — left open."
-                others=""
               fi
-              [ "${others:-1}" = "0" ] && state=READY
             fi
             if [ "$state" = 'READY' ]; then
               # A rebase between listing and merging makes this fail by design —
