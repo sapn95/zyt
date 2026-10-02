@@ -129,12 +129,18 @@ jobs:
             # red one of those would be waved through. The waiting job can
             # never be green before it merges, so a pull request whose only
             # unhappy check is this one is a pull request that is ready.
-            wf_file="${GITHUB_WORKFLOW_REF##*/}"
-            wf_file="${wf_file%%@*}"
-            ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$SHA&per_page=100" \
-              --jq '[.workflow_runs[].check_suite_id]' || true)"
-            runs="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs' || true)"
-            statuses="$(gh api "repos/$REPO/commits/$SHA/status" --jq '.statuses' || true)"
+            # $GITHUB_WORKFLOW_REF is owner/repo/path@ref, and the ref has
+            # slashes of its own, so the ref comes off before the basename.
+            # The other way round leaves "main" as the file name.
+            wf_file="${GITHUB_WORKFLOW_REF%%@*}"
+            wf_file="${wf_file##*/}"
+            # `gh api` prints the error body on stdout, so a failed call has to
+            # be cleared rather than captured: an error object would reach jq
+            # as if it were the answer.
+            if ! ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$SHA&per_page=100" \
+              --jq '[.workflow_runs[].check_suite_id]')"; then ours=""; fi
+            if ! runs="$(gh api "repos/$REPO/commits/$SHA/check-runs?per_page=100" --jq '.check_runs')"; then runs=""; fi
+            if ! statuses="$(gh api "repos/$REPO/commits/$SHA/status" --jq '.statuses')"; then statuses=""; fi
             # A check run is through once it has finished with a conclusion
             # that is not a complaint. Still running, and cancelled, both hold
             # the pull request open rather than being waved past.
@@ -256,13 +262,13 @@ jobs:
             if [ "$state" = 'CLEAN' ] || [ "$state" = 'UNSTABLE' ]; then
               # The same REST rollup as the auto-merge job, for the same
               # reasons — the reasoning is written out there.
-              wf_file="${GITHUB_WORKFLOW_REF##*/}"
-              wf_file="${wf_file%%@*}"
-              ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$sha&per_page=100" \
-                --jq '[.workflow_runs[].check_suite_id]' </dev/null || true)"
-              runs="$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" \
-                --jq '.check_runs' </dev/null || true)"
-              statuses="$(gh api "repos/$REPO/commits/$sha/status" --jq '.statuses' </dev/null || true)"
+              wf_file="${GITHUB_WORKFLOW_REF%%@*}"
+              wf_file="${wf_file##*/}"
+              if ! ours="$(gh api "repos/$REPO/actions/workflows/$wf_file/runs?head_sha=$sha&per_page=100" \
+                --jq '[.workflow_runs[].check_suite_id]' </dev/null)"; then ours=""; fi
+              if ! runs="$(gh api "repos/$REPO/commits/$sha/check-runs?per_page=100" \
+                --jq '.check_runs' </dev/null)"; then runs=""; fi
+              if ! statuses="$(gh api "repos/$REPO/commits/$sha/status" --jq '.statuses' </dev/null)"; then statuses=""; fi
               if unhappy="$(jq -nr --argjson ours "${ours:-}" --argjson runs "${runs:-}" \
                 --argjson statuses "${statuses:-}" '
                 def runstate:
