@@ -56,7 +56,12 @@ jobs:
     permissions:
       contents: write # to merge
       pull-requests: write # `gh pr merge` needs it alongside contents
-      checks: read # `gh pr checks` reads the rollup
+      checks: read # the check runs on the commit
+      # A commit status posted by an app — CodeRabbit here — is not a check
+      # run and is not covered by `checks` or by `contents`. It has a
+      # permission of its own, and without it the combined status endpoint
+      # answers `Resource not accessible by integration (HTTP 403)`.
+      statuses: read
       # `--json workflow` resolves each check run's workflow, which lives
       # behind the actions scope. Without this the rollup query comes back
       # denied, the filter below reads nothing, and every pull request stays
@@ -235,6 +240,7 @@ jobs:
       contents: write
       pull-requests: write
       checks: read
+      statuses: read # see the auto-merge job
       actions: read # see the auto-merge job
     steps:
       - name: merge every Dependabot pull request that is already green
@@ -264,8 +270,17 @@ jobs:
               echo "::notice::authors=$authors, all signed=$signed — left for review."
               continue
             fi
-            state="$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus \
-              --jq .mergeStateStatus </dev/null || echo UNKNOWN)"
+            # UNKNOWN is what GitHub says while it is still working out the
+            # merge commit, which it does for a minute or so after the base
+            # branch moves. The auto-merge job polls regardless; the sweep
+            # gets one chance a day, so giving up on the first UNKNOWN costs
+            # a day.
+            for _ in 1 2 3 4 5 6; do
+              state="$(gh pr view "$pr" --repo "$REPO" --json mergeStateStatus \
+                --jq .mergeStateStatus </dev/null || echo UNKNOWN)"
+              [ "$state" = UNKNOWN ] || break
+              sleep 10
+            done
             # CLEAN and UNSTABLE both defer to the rollup — see the same
             # reasoning in the auto-merge job above.
             if [ "$state" = 'CLEAN' ] || [ "$state" = 'UNSTABLE' ]; then
