@@ -103,75 +103,63 @@ function M.paneChat(rules, obs)
   if not pane then
     return nil
   end
-  local found
   for _, chat in ipairs(M.liveChats(rules, obs)) do
     if M.paneId(chat.pane) == pane then
-      if obs.chosen and chat.session == obs.chosen then
-        return chat
-      end
-      found = found or chat
+      return chat
     end
   end
-  return found
+  return nil
 end
 
---- Which of the live chats the person is in. The pane in front settles it when
---- the terminal named one; otherwise the chat they picked by hand wins, and
---- otherwise the one they typed into last.
+--- Which of the live chats the person is in: the one in the pane the terminal
+--- says is in front, and otherwise the one they typed into last.
 ---
---- Returns remote, unsure, candidates. `unsure` says the answer is a guess:
---- the live chats straddle both classes, and nothing on screen says which
---- panel is in front, so only the person can. A prompt typed within
---- `typingSeconds` is not a guess, and nobody is asked about it. `candidates`
---- are the chats whose repository the rules do have a class for — the ones
---- worth offering.
+--- Returns the chat and `unsure`, which says the pick is a guess: the live
+--- chats straddle both classes, and nothing on screen says which panel is in
+--- front, so only the person can. A prompt typed within `typingSeconds` is not
+--- a guess, and nobody is asked about it.
 ---
 --- The newest chat is the pick even when the rules have no class for its
 --- repository, and then the caller ends up asking about that repository rather
 --- than reading the class off an older chat. That is on purpose: the person is
 --- in the chat they last typed into, and an answer about the repository they
 --- are actually in is true tomorrow as well.
-function M.chatOf(rules, obs)
+function M.chatInFront(rules, obs)
   local chats = M.liveChats(rules, obs)
   if #chats == 0 then
     return nil
   end
-  -- A choice made by hand is an answer about an afternoon; the pane is where
-  -- the person is right now. Nothing they could say beats the terminal saying
-  -- which of its panes they are looking at.
+  -- The pane is where the person is right now: the terminal said which of its
+  -- panes is selected, and nothing softer than that beats it.
   local inPane = M.paneChat(rules, obs)
-  local pick, candidates, seen, kinds = inPane or chats[1], {}, {}, 0
+  local pick, seen, kinds = inPane or chats[1], {}, 0
   for _, chat in ipairs(chats) do
-    if not inPane and obs.chosen and chat.session == obs.chosen then
-      pick = chat
-    end
     local class = M.remoteClass(rules, chat.remote)
-    if class then
-      candidates[#candidates + 1] = chat
-      if not seen[class] then
-        seen[class] = true
-        kinds = kinds + 1
-      end
+    if class and not seen[class] then
+      seen[class] = true
+      kinds = kinds + 1
     end
   end
   -- Somebody who has just typed into a chat is in that chat. The prompt says so
-  -- more plainly than a click would, it is newer than any answer they could
-  -- give, and a panel put in front of them in that second is asking about the
-  -- window they are looking at. It wears off, because the reason the question
-  -- exists at all is the other chat they turn to while this one works.
-  --
-  -- A pick still beats a prompt here, and that is the caller's business rather
-  -- than an order of precedence: a pick is only passed in while it stands, and
-  -- a prompt typed into another chat after it was made is what ends it. The
-  -- times that decision needs are the caller's; this function is handed a
-  -- session id and no clock.
+  -- more plainly than any answer could, and a panel put in front of them in
+  -- that second is asking about the window they are looking at. It wears off,
+  -- because the reason the question exists at all is the other chat they turn
+  -- to while this one works.
   local typing = type(chats[1].age) == "number" and chats[1].age <= rules.typingSeconds
-  local told = typing or inPane ~= nil or (obs.chosen ~= nil and pick.session == obs.chosen)
   local unsure
-  if kinds > 1 and not told then
+  if kinds > 1 and not (typing or inPane ~= nil) then
     unsure = true
   end
-  return pick.remote, unsure, candidates
+  return pick, unsure
+end
+
+--- The repository of the chat in front, and whether that pick is a guess.
+function M.chatOf(rules, obs)
+  local pick, unsure = M.chatInFront(rules, obs)
+  if not pick then
+    return nil
+  end
+  return pick.remote, unsure
 end
 
 --- The name a chat has given itself, whitespace collapsed, or nil when the note
@@ -210,66 +198,6 @@ function M.chatLabel(chat, max)
   end
   local cut = title:sub(1, utf8.offset(title, max) - 1)
   return (cut:gsub("%s+$", "")) .. "…"
-end
-
---- The chats worth putting to the person when nothing on screen says which one
---- is in front: one row per chat, newest first, `max` of them at the outside.
---- Two chats in one checkout that have named themselves are two rows, because
---- the names are what the person is picking between; two that have not are one,
---- since two rows carrying the same repository and the same class would be a
---- choice made blind.
----
---- When there are more chats than `max`, the newest of each class is kept
---- whatever its age: the question only gets asked because the chats straddle
---- both classes, and a list with one class in it has no answer in it. The rest
---- of the room goes to the newest. Which rows are kept is one question and what
---- order they come in is another: the list that comes back is in the order they
---- were typed into either way, so that nothing older stands above something
---- newer for having been the only one of its class.
-function M.chatChoices(rules, obs, max)
-  local _, _, candidates = M.chatOf(rules, obs)
-  local rows, seen = {}, {}
-  for _, chat in ipairs(candidates or {}) do
-    -- What would be written on the row: its name where it has one, and the
-    -- repository underneath it either way, so that two chats of one name in two
-    -- checkouts stay two rows.
-    local row = (titleOf(chat) or "") .. "\0" .. tostring(chat.remote)
-    if type(chat.session) == "string" and not seen[row] then
-      seen[row] = true
-      rows[#rows + 1] = {
-        session = chat.session,
-        remote = chat.remote,
-        title = chat.title,
-        class = M.remoteClass(rules, chat.remote),
-      }
-    end
-  end
-  if #rows <= max then
-    return rows
-  end
-  local taken, classes, room = {}, {}, 0
-  for index, row in ipairs(rows) do
-    -- `max` is the room there is, and a class kept past it would be a row the
-    -- panel was never going to draw.
-    if not classes[row.class] and room < max then
-      classes[row.class] = true
-      taken[index] = true
-      room = room + 1
-    end
-  end
-  for index in ipairs(rows) do
-    if not taken[index] and room < max then
-      taken[index] = true
-      room = room + 1
-    end
-  end
-  local kept = {}
-  for index, row in ipairs(rows) do
-    if taken[index] then
-      kept[#kept + 1] = row
-    end
-  end
-  return kept
 end
 
 --- The remote of the repository a `repo` application's window is about, and
@@ -359,8 +287,8 @@ end
 ---   obs.idle     seconds since the last input
 ---   obs.signal   { age = seconds, remote = url, bundle = id } left behind by a tool's hook
 ---   obs.chats    the same per chat session, plus promptAt, session and pane, newest prompt first
----   obs.chosen   the session id the person named as the chat they are in
----   obs.said     the class they named when asked whose time this is
+---   obs.said     the class they named for the chat in front, when asked
+---   obs.inFront  that chat, as `chatInFront` found it
 ---   obs.resolve  function(path) -> remote url or nil
 --- Returns class, source, unsure — or nil when nothing here has an opinion.
 --- `unsure` means the class is right for one of the chats open here and the
@@ -386,8 +314,8 @@ function M.decide(rules, obs)
     local class, source, unsure = byRepository(rules, obs)
     -- Asked and answered. Several chats of different classes are open and
     -- nothing on screen says which one is being read, so the person said whose
-    -- time it is. That is an answer about now, not about any of the chats, and
-    -- it holds until something newer than it says otherwise.
+    -- time the chat in front is. The answer belongs to that chat and is handed
+    -- back in for as long as it is the one in front.
     if unsure and isClass(rules, obs.said) then
       return obs.said, "said"
     end

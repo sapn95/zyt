@@ -1139,8 +1139,8 @@ TITLE_KINDS = (("custom-title", "customTitle"), ("ai-title", "aiTitle"), ("last-
 
 
 def chat_title(transcript) -> str:
-    """The name a chat goes by, for the list the Spoon offers when it has to ask
-    which one somebody is in. Claude Code writes a `custom-title` entry when the
+    """The name a chat goes by, for the panel the Spoon puts when it has to ask
+    whose time that chat is. Claude Code writes a `custom-title` entry when the
     chat has been renamed by hand and an `ai-title` entry otherwise, rewriting
     the latter as the conversation moves on, and one of those is the title the
     person reads in their own chat list. Empty when the file names it in no way
@@ -1192,8 +1192,8 @@ def write_session(source: str, cwd: str, session, prompt: bool, remote=UNKNOWN, 
     session started in a folder full of checkouts resolves to nothing by its
     working directory, and a prompt carries no file to go on, so without that
     memory the chat the person is typing into would be the one thing about them
-    nobody knows. `title` is what the chat calls itself, so that a list of them
-    names conversations rather than checkouts. `promptAt` is when they last
+    nobody knows. `title` is what the chat calls itself, so that the question
+    names a conversation rather than a checkout. `promptAt` is when they last
     talked to it, to the second, and `promptOrder` the same to the microsecond; a session that has
     only ever worked is no chat and the Spoon skips it. The note also names the
     terminal pane the session was opened in, which is how four chats in four tabs

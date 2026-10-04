@@ -120,16 +120,15 @@ describe("classify.decide", function()
       also.remote = "git@github.com:me/budget.git"
       assert.same({ "work", "chat", true }, { decide(obs) })
 
-      -- unless the person has said, and then their word stands
-      obs.chosen = "w2"
-      assert.same({ "private", "chat" }, { decide(obs) })
-      obs.chosen = "gone"
-      assert.same({ "work", "chat", true }, { decide(obs) })
+      -- unless the person has been asked whose time the chat in front is, and
+      -- then their word stands
+      obs.said = "private"
+      assert.same({ "private", "said" }, { decide(obs) })
 
       -- a chat whose repository the rules know nothing about is not a second
       -- opinion, it is no opinion
       also.remote = "git@example.org:me/elsewhere.git"
-      obs.chosen = nil
+      obs.said = nil
       assert.same({ "work", "chat" }, { decide(obs) })
     end)
 
@@ -150,9 +149,9 @@ describe("classify.decide", function()
       assert.is_nil(decide(obs))
     end)
 
-    it("offers as candidates only the chats the rules have a class for", function()
+    it("counts only the chats the rules have a class for as a disagreement", function()
       -- Nothing has been typed into for a while: a prompt of a minute ago would
-      -- answer the question by itself, and there would be nothing to offer.
+      -- answer the question by itself, and nobody would be asked.
       local chats = {
         { age = 300, promptAt = 3, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
         { age = 600, promptAt = 2, session = "b", remote = "git@example.org:me/elsewhere.git", bundle = "b" },
@@ -164,11 +163,14 @@ describe("classify.decide", function()
           bundle = "b",
         },
       }
-      local remote, unsure, candidates = classify.chatOf(R, { bundle = "b", chats = chats })
+      local remote, unsure = classify.chatOf(R, { bundle = "b", chats = chats })
       assert.equal("git@github.com:me/budget.git", remote)
       assert.is_true(unsure)
-      assert.same({ "a", "c" }, { candidates[1].session, candidates[2].session })
-      assert.equal(2, #candidates)
+      -- the unknown repository is the newest of the three and still not a
+      -- class, so two classes are in play rather than three
+      chats[1].remote = "git@example.org:me/nothing-known.git"
+      local _, oneClass = classify.chatOf(R, { bundle = "b", chats = chats })
+      assert.is_nil(oneClass)
       assert.is_nil(classify.chatOf(R, { bundle = "b", chats = {} }))
     end)
 
@@ -189,6 +191,8 @@ describe("classify.decide", function()
       local remote, unsure = classify.chatOf(R, obs)
       assert.equal("git@github.com:me/budget.git", remote)
       assert.is_nil(unsure)
+      -- and the chat it picked is the one that was typed into
+      assert.equal("a", (classify.chatInFront(R, obs)).session)
       -- the third value is nil, so nothing here is unsure
       assert.same({ "private", "chat" }, { decide(obs) })
       -- once the prompt is older than typingSeconds the question is a question
@@ -196,24 +200,6 @@ describe("classify.decide", function()
       chats[1].age = 121
       local _, later = classify.chatOf(R, obs)
       assert.is_true(later)
-    end)
-
-    it("leaves a pick the caller still stands by in charge of a fresh prompt", function()
-      -- The caller drops a pick as soon as another chat is typed into, because
-      -- it knows when the pick was made and this does not. A pick that reaches
-      -- here is one made after the prompt, and it decides.
-      local chats = {
-        { age = 5, promptAt = 400, session = "a", remote = "git@github.com:me/budget.git", bundle = "b" },
-        {
-          age = 900,
-          promptAt = 100,
-          session = "c",
-          remote = "ssh://git@git.example.com:7999/team/infra.git",
-          bundle = "b",
-        },
-      }
-      local obs = { app = "Code", bundle = "b", title = "git", chats = chats, chosen = "c", resolve = resolve }
-      assert.same({ "work", "chat" }, { decide(obs) })
     end)
 
     it("takes the word of somebody who has been asked whose time it is", function()
@@ -278,7 +264,7 @@ describe("classify.decide", function()
       assert.same({ "private", "cwd" }, { decide(obs) })
     end)
 
-    it("takes the newest of two chats that shared one pane, or the one picked out of them", function()
+    it("takes the newest of two chats that shared one pane", function()
       local older = {
         age = 300,
         promptAt = 100,
@@ -291,11 +277,9 @@ describe("classify.decide", function()
         { age = 60, promptAt = 200, session = "n", pane = "P", remote = "git@github.com:me/budget.git", bundle = "b" }
       local obs = { app = "iTerm2", bundle = "b", title = "", pane = "P", chats = { newer, older } }
       assert.same({ "private", "pane" }, { decide(obs) })
-      obs.chosen = "o"
-      assert.same({ "work", "pane" }, { decide(obs) })
-      -- a chat picked in another pane says nothing about this one
-      obs.chosen = "elsewhere"
-      assert.same({ "private", "pane" }, { decide(obs) })
+      -- the terminal named the pane, so there is nothing to ask about either
+      local _, unsure = classify.chatOf(R, obs)
+      assert.is_nil(unsure)
     end)
 
     it("applies the note to the application that wrote it and to no other", function()
@@ -372,74 +356,43 @@ describe("classify.chatLabel", function()
   end)
 end)
 
-describe("classify.chatChoices", function()
+describe("classify.chatInFront", function()
   local infra = "ssh://git@git.example.com:7999/team/infra.git"
   local budget = "git@github.com:me/budget.git"
 
-  local function chat(session, remote)
-    return { age = 60, promptAt = 100, session = session, remote = remote, bundle = "b" }
+  local function chat(session, remote, age)
+    return { age = age or 300, promptAt = 100, session = session, remote = remote, bundle = "b" }
   end
 
-  it("carries the title the note has, for the row to say", function()
-    local one = chat("a", infra)
-    one.title = "The filer chargeback numbers"
-    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, chat("c", budget) } }, 8)
-    assert.equal("The filer chargeback numbers", rows[1].title)
-    assert.is_nil(rows[2].title)
+  it("is the chat last typed into, and the question is about that one", function()
+    local newest, older = chat("a", budget), chat("c", infra)
+    newest.promptAt = 400
+    local pick, unsure = classify.chatInFront(R, { bundle = "b", chats = { newest, older } })
+    assert.equal("a", pick.session)
+    assert.is_true(unsure)
   end)
 
-  it("offers each repository once, in the order they were typed into", function()
-    local chats = { chat("a", infra), chat("b", infra), chat("c", budget) }
-    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 8)
-    assert.equal(2, #rows)
-    assert.same({ "a", "c" }, { rows[1].session, rows[2].session })
-    assert.same({ "work", "private" }, { rows[1].class, rows[2].class })
+  it("is the chat in the pane the terminal says is in front", function()
+    local inPane, other = chat("a", budget), chat("c", infra)
+    inPane.pane, other.pane = "P", "Q"
+    local pick, unsure = classify.chatInFront(R, { bundle = "b", pane = "P", chats = { other, inPane } })
+    assert.equal("a", pick.session)
+    -- the terminal said which panel is in front, so nobody is asked
+    assert.is_nil(unsure)
   end)
 
-  it("offers two chats of one repository once they have names of their own", function()
-    local one, two = chat("a", infra), chat("b", infra)
-    one.title, two.title = "The chargeback numbers", "The migration runbooks"
-    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, two, chat("c", budget) } }, 8)
-    -- two conversations in one checkout are two things to pick between as soon
-    -- as the rows can tell them apart; without names they are one row still
-    assert.equal(3, #rows)
-    assert.same({ "a", "b", "c" }, { rows[1].session, rows[2].session, rows[3].session })
-    one.title, two.title = nil, nil
-    assert.equal(2, #classify.chatChoices(R, { bundle = "b", chats = { one, two, chat("c", budget) } }, 8))
+  it("asks nothing while somebody is typing, or when the chats agree", function()
+    local typed, older = chat("a", budget, 5), chat("c", infra)
+    typed.promptAt = 400
+    local _, typing = classify.chatInFront(R, { bundle = "b", chats = { typed, older } })
+    assert.is_nil(typing)
+    local _, agreeing = classify.chatInFront(R, { bundle = "b", chats = { chat("a", infra), chat("c", infra) } })
+    assert.is_nil(agreeing)
   end)
 
-  it("keeps one name in two checkouts apart", function()
-    local one, two = chat("a", infra), chat("b", budget)
-    one.title, two.title = "Fix the pipeline", "Fix the pipeline"
-    local rows = classify.chatChoices(R, { bundle = "b", chats = { one, two } }, 8)
-    assert.equal(2, #rows)
-    assert.same({ "work", "private" }, { rows[1].class, rows[2].class })
-  end)
-
-  it("leaves out a repository the rules have no class for", function()
-    local chats = { chat("a", infra), chat("x", "git@example.org:me/elsewhere.git") }
-    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 8)
-    assert.equal(1, #rows)
-    assert.equal("a", rows[1].session)
-    assert.same({}, classify.chatChoices(R, { bundle = "b", chats = {} }, 8))
-  end)
-
-  it("keeps a chat of each class when there is no room for them all", function()
-    local chats = {}
-    for index = 1, 5 do
-      chats[index] = chat("w" .. index, (infra:gsub("infra", "infra" .. index)))
-    end
-    chats[#chats + 1] = chat("p", budget)
-    local rows = classify.chatChoices(R, { bundle = "b", chats = chats }, 3)
-    -- the newest of each class is kept, and then whatever room is left goes to
-    -- the newest: a list of five work repositories would be a question with no
-    -- answer in it. What is kept is one question, the order is another, and the
-    -- rows come back in the order they were typed into
-    assert.equal(3, #rows)
-    assert.same({ "w1", "w2", "p" }, { rows[1].session, rows[2].session, rows[3].session })
-    assert.same({ "work", "work", "private" }, { rows[1].class, rows[2].class, rows[3].class })
-    -- and room for one is one row, rather than one of each class
-    assert.equal(1, #classify.chatChoices(R, { bundle = "b", chats = chats }, 1))
+  it("is nothing when no chat is live here", function()
+    assert.is_nil(classify.chatInFront(R, { bundle = "b", chats = {} }))
+    assert.is_nil(classify.chatInFront(R, { bundle = "elsewhere", chats = { chat("a", budget) } }))
   end)
 end)
 
