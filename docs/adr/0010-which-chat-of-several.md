@@ -1,7 +1,8 @@
 # 0010 — Which chat, out of the several open in one editor
 
 **Status:** accepted, 2026-09-20; amended 2026-09-28, the panel asks whose time
-it is and the chats are listed in the menu.
+it is; amended 2026-10-04, the answer belongs to the chat and the list of chats
+is gone.
 
 ## The problem
 
@@ -55,7 +56,8 @@ is in front. A terminal does know, and
 [ADR 0012](0012-the-pane-in-front-is-the-chat.md) asks it, so what follows is
 about the editors that do not. When the live chats straddle both classes the
 panel from [ADR 0009](0009-ask-once-and-remember.md) opens and asks whose time
-it is: Work, Private, Later. Two rows and the way out.
+it is: Work, Private, Later. Two rows and the way out, and the line above them
+names the chat the question is about.
 
 Listing the chats instead was tried first, and the reasoning was sound enough on
 paper: the class of each is already known, so the only open question is which of
@@ -64,18 +66,27 @@ about classes at all. In practice it asks them to do the classifying. A list of
 conversations has to be read, and then mapped onto work and private in the head,
 several times an afternoon, and the rows were repository names at first, which
 is not how anybody remembers which chat is which. The question the tracker needs
-answered is whose time this is, and that is the question to put. The count of
-open chats goes in the line above the rows, because that is the whole reason it
-is being asked.
+answered is whose time this is, and that is the question to put.
 
-The answer is about this hour, not about any of the chats, and it is kept in
-memory. A prompt landing in one of that application's chats drops it: typing
-says where they are more plainly than an answer given a while ago, and the chat
-typed into is what the class comes from again. An unlock drops it too, for the
-same reason a pin does not survive one. A question that was answered gives its
-cooldown back, so the next time nothing can tell, it is asked again rather than
-guessed at for half an hour; Later is what spends the cooldown, and that is what
-Later is for.
+**The answer belongs to the chat it was asked about**, and is kept in memory
+under its session id. The chat the person last typed into is the one the panel
+names and the one the answer is filed under, so each conversation is asked about
+once and never again, however many times the editor goes quiet afterwards. What
+brings the panel back is a chat nobody has answered for: a new session, or an
+older one surfacing in an editor whose chats still straddle both classes.
+
+Asking per application was what the amendment of 2026-09-28 did, and it asked
+too often. The answer was dropped by any prompt in any of that application's
+chats, including the chat it was about, so a conversation that had just been
+classified put the same question again on its next exchange. Keyed by chat, a
+prompt needs to drop nothing: typing in a chat that has been answered for leaves
+a standing answer standing, and typing in one that has not is `typingSeconds` of
+quiet followed by its own question. An unlock no longer drops the answers either.
+A conversation is work or private for its whole life, which an hour of an editor
+is not.
+
+Later still spends the cooldown, which is what keeps a question somebody walked
+away from, or one they chose not to answer, from coming straight back.
 
 Typing is an answer, and it comes first. A prompt sent within `typingSeconds`
 (two minutes) says which chat the person is in more plainly than a click on a
@@ -85,22 +96,18 @@ because the reason the question exists is the other chat, the one they turn to
 while this one works, and that is what makes it rare. It is put to somebody who
 has been reading rather than typing, which is exactly when nothing else can tell.
 
-**The chats are in the menu**, one row each, for naming one by hand when that is
-what the person wants: the class of the named chat then decides and no panel is
-involved. One row per chat, up to eight of them, and every chat whose repository
-has a class gets one. Two chats in one checkout are two rows once they have named
-themselves, since the names are what is being picked between; two that have not
-named themselves are one row, because two rows carrying the same repository and
-the same class would be a choice made blind. Past eight the newest chat of each
-class is kept whatever its age, since a list with one class in it has nothing to
-pick between. What is kept is one question and the order is another: the rows
-stand in the order they were typed into, so nothing older sits above something
-newer for having been the only one of its class.
+**The list of chats is gone.** It stood in the menu for a fortnight as a way of
+naming the chat in front by hand, and nothing about it earned its keep: naming
+one is the same work as answering the question, it was one more thing to keep
+current on every tick, and the question the panel now puts does not need to know
+which chat it is to be answered. What is left of it in the menu is one row,
+offering to forget the answer about the chat in front, under the name that chat
+goes by.
 
-A row names the conversation, not the checkout. It said the repository at first,
-because that is where the class comes from and there was nothing else to go on,
-and it read as a list of checkouts. The note carries the name the chat goes by
-now. Claude Code keeps a `custom-title` entry in the session transcript for a
+The name is what the panel says, so it is still read. It said the repository at
+first, because that is where the class comes from and there was nothing else to
+go on, and it read as a list of checkouts. The note carries the name the chat
+goes by now. Claude Code keeps a `custom-title` entry in the session transcript for a
 chat that has been renamed by hand and an `ai-title` entry otherwise, rewriting
 the latter as the conversation moves on, and one of those is the title the person
 reads in their own list of chats. A name they typed in themselves comes first,
@@ -127,11 +134,10 @@ typed in, the newest of them was 28.9 KB from the end at the worst, in a file of
 37 MB. The hook writing the title at the prompt is what keeps that from having to
 happen at all, and a note too old to be a live chat is not worth a file to read.
 
-A chat named from the menu holds for that application until they type into
-another one, the same as an answer given to the panel, and for the same reason.
-Neither is written down: both are answers about this afternoon, not rules about
-a repository. Until there is one, the class is still the chat last typed into,
-and the tracker keeps running rather than stopping on a question
+Nothing of this is written down: an answer about a conversation is true while
+that conversation is live, and the notes behind it expire with it. Until there is
+an answer, the class is still the chat last typed into, and the tracker keeps
+running rather than stopping on a question
 ([ADR 0002](0002-unknown-is-sticky-not-a-third-class.md)).
 
 ## What was rejected
@@ -146,6 +152,13 @@ editor to install and keep working, for one string; Kiro and the next editor
 each need their own. The person answers in one click and the hook keeps working
 for every tool that has one.
 
-Writing the choice to `learned.json`. The answers there are about a repository
-or an application and stay true tomorrow. Which chat somebody is reading is
-true for an afternoon, and a stale answer there would be worse than no answer.
+Writing the answer to `learned.json`. The answers there are about a repository
+or an application and stay true tomorrow. One about a chat is true while the
+chat is, and the next conversation in the same checkout can be the other class,
+so a stale answer there would be worse than no answer.
+
+Asking about every new chat, whatever the rules say. It is one question per
+conversation either way, and the rules answer most of them correctly without
+being asked: a chat in an employer repository among employer repositories is
+work, and a panel confirming that is a panel nobody needed. The question stays
+where nothing else can tell.

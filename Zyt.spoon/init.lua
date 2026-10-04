@@ -77,13 +77,10 @@ obj.override = nil
 obj.locked = false
 obj.asleep = false
 
---- Per application, the chat the person said they were in, and when they said
---- it. In memory only: it is an answer about this afternoon, not a rule.
-obj.chosen = {}
-
---- Per application, the class the person named when they were asked whose time
---- it was, and when they named it. In memory only, and dropped as soon as
---- anything newer says where they are: it is an answer about this hour.
+--- Per chat, the class the person named when they were asked whose time it
+--- was. In memory only, and kept for as long as the chat is one: a chat is
+--- asked about once, and an answer about this conversation is not a rule about
+--- the repository it happens to be in.
 obj.said = {}
 
 --- Per session, the name its transcript gave it and where that file is. In
@@ -222,11 +219,6 @@ local COLOURS = {
   private = { red = 0.55, green = 0.35, blue = 0.75 },
   other = { red = 0.35, green = 0.35, blue = 0.38 },
 }
-
--- How many chats the panel offers at once: longer than an editor is ever asked
--- about, shorter than the screen the panel hangs from. `classify.chatChoices`
--- keeps a chat of each class in the list when it has to cut one.
-local MAX_CHAT_CHOICES = 8
 
 -- How much of a transcript is read to find the name a chat goes by, and how
 -- long that answer is kept before the file is read again. The name changes as a
@@ -514,17 +506,19 @@ function obj:look(app, title, bundle, idle, signal)
     pane = paneOf and paneOf() or nil,
     signal = signal,
     chats = chats,
-    chosen = self:stillChosen(bundle, chats),
-    said = self:stillSaid(bundle, chats),
     resolve = self.resolve,
   }
+  -- The chat in front is what an answer about a chat belongs to, and it is
+  -- worked out before the rules run: the answer is one of the things they read.
+  local inFront = classify.chatInFront(self.rules, obs)
+  obs.inFront = inFront
+  obs.said = inFront and self.said[inFront.session or ""] or nil
   local key, remote = self:about(obs)
-  local inPane = classify.paneChat(self.rules, obs)
   self.seen = {
     app = app,
     bundle = bundle,
-    chats = classify.liveChats(self.rules, obs),
-    inPane = inPane and inPane.session or nil,
+    chat = inFront and inFront.session or nil,
+    chatAbout = inFront and (classify.chatLabel(inFront, CHAT_LABEL_CHARS) or repoLabel(inFront.remote)) or nil,
     key = key,
     about = remote and shortRepo(remote) or app,
   }
@@ -543,86 +537,25 @@ function obj:about(obs)
   return learned.key(remote, obs.app), remote
 end
 
---- The cooldown on asking which chat somebody is in is per application, the
---- same as the chat they named, so that forgetting one answer clears both.
+--- A question about a chat is filed under that chat, so that each one is asked
+--- about once and an answered chat is never asked about again.
 local CHAT_PREFIX = "chat:"
 
-local function chatKey(bundle)
-  return CHAT_PREFIX .. (bundle or "")
+local function chatKey(session)
+  return CHAT_PREFIX .. (session or "")
 end
 
 local function isChatKey(key)
   return type(key) == "string" and key:sub(1, #CHAT_PREFIX) == CHAT_PREFIX
 end
 
---- When a prompt was sent, as closely as the note can say. The second a prompt
---- and an answer share cannot put them in order, and which came first is what
---- decides whether the answer still stands. A note from before the hook wrote
---- the moment has its second and nothing better.
-local function promptMoment(chat)
-  return chat.promptOrder or chat.promptAt or 0
-end
-
---- The chat the person named for this application, while that choice still
---- stands. Typing into another one of them replaces it: they have said where
---- they are by saying something there. Only the chats of this application can
---- do that. A prompt typed in the other editor says nothing about which panel
---- is in front here.
-function obj:stillChosen(bundle, chats)
-  local at = bundle or ""
-  local choice = self.chosen[at]
-  if not choice then
-    return nil
-  end
-  for _, chat in ipairs(chats) do
-    if chat.bundle == bundle and chat.session ~= choice.session and promptMoment(chat) > choice.at then
-      self.chosen[at] = nil
-      return nil
-    end
-  end
-  return choice.session
-end
-
---- The class the person named for this application, while that answer still
---- stands. A prompt in one of its chats replaces it: typing says where they are
---- more plainly than an answer given a while ago, and the chat typed into is
---- what the class comes from again.
-function obj:stillSaid(bundle, chats)
-  local at = bundle or ""
-  local answer = self.said[at]
-  if not answer then
-    return nil
-  end
-  for _, chat in ipairs(chats) do
-    if chat.bundle == bundle and promptMoment(chat) > answer.at then
-      self.said[at] = nil
-      return nil
-    end
-  end
-  return answer.class
-end
-
---- Zyt:say(bundle, class)
+--- Zyt:say(session, class)
 --- Method
---- Take the person's word for whose time this is, for as long as nothing newer
---- says otherwise. Not written down: the same editor is work in one hour and
---- private in the next, which is why the question comes back at all.
-function obj:say(bundle, class)
-  self.said[bundle or ""] = { class = class, at = hs.timer.secondsSinceEpoch() }
-  -- A question that was answered has not been spent. It is asked again as soon
-  -- as nothing can tell whose time it is, which is the whole of the bargain.
-  self.asked[chatKey(bundle)] = nil
-  self:dismiss()
-  self:tick()
-end
-
---- Zyt:choose(bundle, session)
---- Method
---- Take the person's word for which of the chats open in an application they
---- are in. Nothing on screen can say: the editor's accessibility tree does not
---- expose its panels.
-function obj:choose(bundle, session)
-  self.chosen[bundle or ""] = { session = session, at = hs.timer.secondsSinceEpoch() }
+--- Take the person's word for whose time the chat in front is. Not written
+--- down: it is an answer about this conversation, and the next one in the same
+--- checkout can be the other class.
+function obj:say(session, class)
+  self.said[session or ""] = class
   self:dismiss()
   self:tick()
 end
@@ -655,18 +588,23 @@ function obj:recall(now, obs, key, remote)
 end
 
 --- Several chats are open in this application, they are not all of one class,
---- and nothing on screen says which of them is being read. The question put to
---- the person is not which chat that is: the answer to that is a list of
---- conversations to read at a glance, and it asks them to do the classifying.
---- It is the question zyt needs answered, whose time this is, and the answer
---- holds until something newer says otherwise.
+--- and nothing on screen says which of them is being read. The question is
+--- whose time the chat in front is, it names that chat, and it is asked once:
+--- the answer belongs to the conversation and holds for as long as it is the
+--- one in front. A chat nobody has been asked about yet is the only reason this
+--- comes up, so a new one is a question and the ones already answered are not.
 ---
 --- Called on every tick, whether the question is open or not: `unsure` says it
 --- is, and the panel belongs to this method either way.
 function obj:askWhose(now, obs, unsure)
-  -- Keyed the way the answer itself is, by the application hosting the chats,
-  -- so that forgetting one clears both.
-  local key = chatKey(obs.bundle)
+  -- Keyed by the chat it is about, the way the answer itself is, so that an
+  -- answered chat is never asked about again and a chat that has just appeared
+  -- is asked about even though another one was answered a minute ago.
+  local session = obs.inFront and obs.inFront.session or nil
+  if type(session) ~= "string" then
+    unsure = false
+  end
+  local key = chatKey(session)
   local standing = self.prompt ~= nil and self.prompt.about == key
   -- A question about the chats of one application is a question about the
   -- window in front. With another application there it cannot change what is
@@ -699,10 +637,10 @@ function obj:askWhose(now, obs, unsure)
       return
     end
   end
-  -- How many chats disagree is why this is being asked, and saying so is what
-  -- tells this panel apart from the one about a repository nobody knows.
-  local open = #classify.chatChoices(self.rules, obs, MAX_CHAT_CHOICES)
-  local shown = self:ask("whose time is this?", ("%s · %d chats"):format(obs.app or "?", open), {
+  -- The chat it is about is what the panel says, so the answer is about a
+  -- conversation the person recognises rather than about an editor.
+  local about = classify.chatLabel(obs.inFront, CHAT_LABEL_CHARS) or repoLabel(obs.inFront.remote)
+  local shown = self:ask("whose time is this?", ("%s · %s"):format(obs.app or "?", about), {
     { id = "work", label = "Work", colour = COLOURS.work },
     { id = "private", label = "Private", colour = COLOURS.private },
     { id = LATER, label = "Later", colour = COLOURS.other },
@@ -710,11 +648,12 @@ function obj:askWhose(now, obs, unsure)
     if id == LATER then
       self:dismiss()
     else
-      self:say(obs.bundle, id)
+      self:say(session, id)
     end
   end, key)
-  -- The cooldown counts from a question somebody saw, and Later is what spends
-  -- it. An answer gives it back, in `say`.
+  -- The cooldown counts from a question somebody saw. It is what keeps a Later,
+  -- or a panel nobody looked at, from coming back at once. An answer does not
+  -- need it: the chat it was about has stopped being a question.
   if shown then
     self.asked[key] = now
   end
@@ -739,25 +678,23 @@ function obj:saveLearned()
   writeAtomically(self.statePath .. "/learned.json", hs.json.encode(self.learned, true))
 end
 
---- Zyt:forget([key, bundle])
+--- Zyt:forget([key, session])
 --- Method
 --- Drop one answer, or all of them. With a `key` it is the answer filed under
---- that key, and with it the chat named for `bundle` and the cooldowns on both:
---- those are answers about the same window, and forgetting one while keeping the
---- other would leave it classified by whichever was kept. With no arguments
---- every answer goes.
-function obj:forget(key, bundle)
+--- that key, and with it the answer about the chat in front and the cooldowns
+--- on both: those are answers about the same window, and forgetting one while
+--- keeping the other would leave it classified by whichever was kept. With no
+--- arguments every answer goes.
+function obj:forget(key, session)
   if key then
     self.learned[key] = nil
     self.asked[key] = nil
-    self.chosen[bundle or ""] = nil
-    self.said[bundle or ""] = nil
-    self.asked[chatKey(bundle)] = nil
+    self.said[session or ""] = nil
+    self.asked[chatKey(session)] = nil
     self:saveLearned()
   else
     self.learned = {}
     self.asked = {}
-    self.chosen = {}
     self.said = {}
     os.remove(self.statePath .. "/learned.json")
   end
@@ -1160,43 +1097,6 @@ function obj:openRules()
   hs.execute(("open %q"):format(self.configPath))
 end
 
---- The chats open in the application that was last in front, so that the one
---- being talked to can be named without waiting for the panel to ask. Empty
---- unless there are at least two of them: with one there is nothing to choose.
-function obj:chatMenu()
-  local seen = self.seen or {}
-  local chats = seen.chats or {}
-  if #chats < 2 then
-    return {}
-  end
-  local choice = self.chosen[seen.bundle or ""]
-  local items = { { title = "-" }, { title = "Which chat in " .. (seen.app or "?") .. "?", disabled = true } }
-  for _, chat in ipairs(chats) do
-    -- The chat in the pane the terminal says is in front is ticked without
-    -- anybody having picked it: it is not a choice, it is where they are. While
-    -- the pane answers, an older pick about another one of them is not shown as
-    -- if it still counted.
-    local inFront = seen.inPane ~= nil and seen.inPane == chat.session
-    local picked = seen.inPane == nil and choice ~= nil and choice.session == chat.session
-    items[#items + 1] = {
-      title = ("%s%s · %s · %s · typed %s"):format(
-        classify.chatLabel(chat, CHAT_LABEL_CHARS) or repoLabel(chat.remote),
-        inFront and " (in front)" or "",
-        shortRepo(chat.remote),
-        classify.remoteClass(self.rules, chat.remote) or "unknown",
-        os.date("%H:%M", chat.promptAt)
-      ),
-      indent = 1,
-      checked = inFront or picked,
-      disabled = type(chat.session) ~= "string",
-      fn = function()
-        self:choose(seen.bundle, chat.session)
-      end,
-    }
-  end
-  return items
-end
-
 --- Forgetting has two scopes, because "forget that" is usually about the window
 --- in front and not about every answer ever given. The narrow one names what it
 --- will drop, so there is nothing to find out by clicking it.
@@ -1207,7 +1107,17 @@ function obj:forgetMenu()
     items[#items + 1] = {
       title = ("Only for %s"):format(seen.about or "this window"),
       fn = function()
-        self:forget(seen.key, seen.bundle)
+        self:forget(seen.key, seen.chat)
+      end,
+    }
+  end
+  if seen.chat and self.said[seen.chat] then
+    items[#items + 1] = {
+      title = ("Ask again about %s"):format(seen.chatAbout or "this chat"),
+      fn = function()
+        self.said[seen.chat] = nil
+        self.asked[chatKey(seen.chat)] = nil
+        self:tick()
       end,
     }
   end
@@ -1271,9 +1181,6 @@ function obj:menu()
       menu = self:forgetMenu(),
     },
   }
-  for _, item in ipairs(self:chatMenu()) do
-    items[#items + 1] = item
-  end
   items[#items + 1] = { title = "-" }
   items[#items + 1] = {
     title = "Quit zyt",
@@ -1326,7 +1233,9 @@ function obj:watch()
     elseif event == W.screensDidUnlock or event == W.sessionDidBecomeActive then
       self.locked = false
       self.override = nil
-      self.said = {}
+      -- The answers about the chats survive: a conversation is work or private
+      -- for its whole life, and a lunch break does not change that. A pin does
+      -- not survive an unlock, because that is an answer about an hour.
       self:tick()
       self:syncWindow()
     elseif event == W.systemWillSleep then
