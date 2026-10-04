@@ -93,14 +93,15 @@ Each session gets a note of its own, so several chats in one editor can be told
 apart. When they are all in repositories of the same class, that is the class,
 whichever panel you are reading. When they straddle both, nothing on screen can
 say which one you are in, because the editor does not expose its panels, so zyt
-asks whose time it is: Work, Private, Later. The answer is about the hour and is
-not written down, and a prompt in one of those chats replaces it, because typing
-says where you are. Typing also keeps the question away for two minutes, and a
-panel about an editor you have left goes on its own. Answering gives the
-cooldown back, so it asks again the next time it cannot tell; Later is what buys
-the quiet. The chats themselves are in the menu, one row each, named the way
-your own chat list names them, read out of the transcript for the ones you have
-not typed into lately ([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
+asks whose time the chat you last typed into is, and the panel names that chat:
+Work, Private, Later. The answer belongs to that conversation and holds for as
+long as it is the one in front, so each chat is asked about once and a chat you
+have answered for is never asked about again. The next new chat in the same
+editor is a question of its own, and that is the only thing that brings the
+panel back. Typing keeps it away for two minutes, and a panel about an editor
+you have left goes on its own. Later buys half an hour of quiet. Forgetting an
+answer about a chat is in the menu, under the name the chat goes by
+([ADR 0010](docs/adr/0010-which-chat-of-several.md)).
 
 iTerm2 is the exception, because it knows. It gives every shell it opens an id
 for the pane it opened it in, the hook writes that id into the note, and it
