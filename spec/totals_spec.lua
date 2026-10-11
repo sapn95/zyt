@@ -54,3 +54,24 @@ describe("totals.forDay and two rows over one hour", function()
     assert.equal(7200, totals.forDay(rows, "2026-09-30").work)
   end)
 end)
+
+describe("totals.forDay and a private minute inside a meeting", function()
+  it("counts it once, and as private", function()
+    -- The calendar writes the meeting as one row from 09:00 to 11:00 and the
+    -- keyboard writes the private half hour underneath it.
+    local rows = totals.parse(table.concat({
+      "start,end,seconds,class",
+      "2026-09-14T09:00:00+02:00,2026-09-14T11:00:00+02:00,7200,work",
+      "2026-09-14T09:40:00+02:00,2026-09-14T10:10:00+02:00,1800,private",
+    }, "\n"))
+    assert.same({ work = 5400, private = 1800 }, totals.forDay(rows, "2026-09-14"))
+  end)
+
+  it("leaves a day that was only private without any work in it", function()
+    local rows = totals.parse(table.concat({
+      "start,end,seconds,class",
+      "2026-09-14T20:00:00+02:00,2026-09-14T22:00:00+02:00,7200,private",
+    }, "\n"))
+    assert.same({ work = 0, private = 7200 }, totals.forDay(rows, "2026-09-14"))
+  end)
+end)

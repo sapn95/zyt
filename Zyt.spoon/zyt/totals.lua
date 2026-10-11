@@ -35,25 +35,56 @@ end
 --- Seconds per class that fall on `day` (YYYY-MM-DD). A row that runs past
 --- midnight is split: the part before it belongs to its start day, the rest
 --- to the day after, which is how the report counts too.
---- The union of a list of `{from, to}`, in seconds. Two rows that cover the
---- same minute are not two minutes: somebody at the keyboard in a meeting is
---- doing both, and the record says both.
-local function union(spans)
+--- A list of `{from, to}` merged into the stretches it covers, in order. Two
+--- rows over the same minute are one stretch: somebody at the keyboard in a
+--- meeting is doing both, and the record says both.
+local function merge(spans)
   table.sort(spans, function(a, b)
     return a[1] < b[1]
   end)
-  local total, reach = 0, nil
+  local out = {}
   for _, span in ipairs(spans) do
-    local from, to = span[1], span[2]
-    if not reach or from > reach then
-      total = total + (to - from)
-      reach = to
-    elseif to > reach then
-      total = total + (to - reach)
-      reach = to
+    local last = out[#out]
+    if last and span[1] <= last[2] then
+      last[2] = math.max(last[2], span[2])
+    else
+      out[#out + 1] = { span[1], span[2] }
     end
   end
-  return total
+  return out
+end
+
+--- The seconds a list of merged stretches covers.
+local function total(stretches)
+  local sum = 0
+  for _, stretch in ipairs(stretches) do
+    sum = sum + (stretch[2] - stretch[1])
+  end
+  return sum
+end
+
+--- `stretches` with every second of `holes` taken out of them. Both merged
+--- and in order, as `merge` gives them back.
+local function without(stretches, holes)
+  local out = {}
+  for _, stretch in ipairs(stretches) do
+    local cursor = stretch[1]
+    for _, hole in ipairs(holes) do
+      if hole[2] > cursor and hole[1] < stretch[2] then
+        if hole[1] > cursor then
+          out[#out + 1] = { cursor, hole[1] }
+        end
+        cursor = math.max(cursor, hole[2])
+      end
+      if cursor >= stretch[2] then
+        break
+      end
+    end
+    if cursor < stretch[2] then
+      out[#out + 1] = { cursor, stretch[2] }
+    end
+  end
+  return out
 end
 
 function M.forDay(rows, day)
@@ -70,7 +101,12 @@ function M.forDay(rows, day)
       end
     end
   end
-  return { work = union(spans.work), private = union(spans.private) }
+  -- A minute spent privately is not a work minute, whatever else says it is.
+  -- The calendar writes a meeting as one row and the keyboard goes on
+  -- recording underneath it, so a private message answered in a meeting
+  -- arrives as both. The menu says the same thing the report does.
+  local private = merge(spans.private)
+  return { work = total(without(merge(spans.work), private)), private = total(private) }
 end
 
 --- 7h05 for 25500 seconds. Whole minutes; nobody books seconds.
