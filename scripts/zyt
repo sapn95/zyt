@@ -76,6 +76,13 @@ REPORT_DEFAULTS = {
     "lunch": {"earliest": "11:15", "latest": "13:00"},
     "defaultStart": "08:00",
     "fillEmptyDays": False,
+    # A private stretch at least this long is kept out of the proposal: the
+    # blocks go round it rather than over it. Below it they are left alone,
+    # because private time on a workday arrives as slivers — a glance at a
+    # chat, a message answered — and a block cut at every one of them would be
+    # twenty blocks nobody can book. Null keeps every stretch out, however
+    # short.
+    "skipPrivateMinutes": 30,
 }
 # The calendar half. Times come back from Graph in UTC and are turned into
 # epoch seconds here, so the Spoon parses nothing. The scopes are what a token
@@ -207,20 +214,59 @@ def split_by_day(segments: list) -> list:
     return out
 
 
-def covered(segments: list) -> int:
-    """The seconds a list of segments covers between them. Two that cover the
-    same minute are not two minutes: somebody at the keyboard in a meeting is
-    doing both, the record says both, and the day is still the day."""
-    total = 0
-    reach = None
+def spans(segments: list) -> list:
+    """The stretches a list of segments covers between them, merged and in
+    order. Two segments over the same minute are one stretch: somebody at the
+    keyboard in a meeting is doing both, the record says both, and the day is
+    still the day."""
+    merged = []
     for segment in sorted(segments, key=lambda s: s.start):
-        if reach is None or segment.start > reach:
-            total += segment.seconds
-            reach = segment.end
-        elif segment.end > reach:
-            total += int((segment.end - reach).total_seconds())
-            reach = segment.end
-    return total
+        if merged and segment.start <= merged[-1][1]:
+            if segment.end > merged[-1][1]:
+                merged[-1][1] = segment.end
+        else:
+            merged.append([segment.start, segment.end])
+    return merged
+
+
+def without(stretches: list, holes: list) -> list:
+    """`stretches` with every minute of `holes` taken out of them. Both are
+    merged and in order, as `spans` returns them."""
+    out = []
+    for start, end in stretches:
+        cursor = start
+        for hole_start, hole_end in holes:
+            if hole_end <= cursor or hole_start >= end:
+                continue
+            if hole_start > cursor:
+                out.append([cursor, hole_start])
+            cursor = max(cursor, hole_end)
+            if cursor >= end:
+                break
+        if cursor < end:
+            out.append([cursor, end])
+    return out
+
+
+def seconds(stretches: list) -> int:
+    return sum(int((end - start).total_seconds()) for start, end in stretches)
+
+
+def covered(segments: list) -> int:
+    """The seconds a list of segments covers between them."""
+    return seconds(spans(segments))
+
+
+def minute_of(moment) -> int:
+    """A moment as minutes from its own midnight."""
+    return moment.hour * 60 + moment.minute
+
+
+def minute_after(moment) -> int:
+    """The same, rounded up to the whole minute it ends in. A stretch kept out
+    of the booking keeps every second of itself out, at both ends."""
+    extra = 1 if moment.second or moment.microsecond else 0
+    return min(minute_of(moment) + extra, 24 * 60)
 
 
 def summarise(day_segments: list) -> dict:
@@ -233,11 +279,21 @@ def summarise(day_segments: list) -> dict:
             longest_break = max(longest_break, int((segment.start - reach).total_seconds()))
         if reach is None or segment.end > reach:
             reach = segment.end
+    # A minute spent privately is not a work minute, whatever else says it is.
+    # The calendar writes a meeting as one stretch and the keyboard goes on
+    # recording underneath it, so a glance at a private chat during a meeting
+    # arrives as work and as private at once. Work is what is left of it: the
+    # booking proposal is built from this figure, and the one rule it has to
+    # keep is that nothing private is in it.
+    at_work = without(spans(work), spans(private))
+    private_spans = spans(private)
     return {
-        "start": work[0].start if work else None,
-        "end": max((s.end for s in work), default=None),
-        "work": covered(work),
+        "start": at_work[0][0] if at_work else None,
+        "end": at_work[-1][1] if at_work else None,
+        "work": seconds(at_work),
         "private": covered(private),
+        # Minutes from midnight, because that is what the proposal works in.
+        "privateAt": [[minute_of(start), minute_after(end)] for start, end in private_spans],
         "break": longest_break,
     }
 
@@ -263,14 +319,80 @@ def week_days(segments: list, monday: dt.date) -> dict:
 # The booking proposal
 
 
-def capacity(report: dict) -> int:
-    """The most minutes one day can hold: blocks and breaks inside the window."""
-    window = minutes(report["latest"]) - minutes(report["earliest"])
+def kept_out(summary: dict, report: dict) -> list:
+    """The private stretches the booking has to go round: the ones inside the
+    window that are at least `skipPrivateMinutes` long, clipped to it."""
+    floor = report.get("skipPrivateMinutes")
+    if floor is None:
+        floor = 0
+    opens, closes = minutes(report["earliest"]), minutes(report["latest"])
+    out = []
+    for start, end in summary.get("privateAt") or []:
+        start, end = max(start, opens), min(end, closes)
+        if end - start >= max(floor, 1):
+            out.append([start, end])
+    return out
+
+
+def rooms(report: dict, busy: list) -> list:
+    """The stretches of the window a block may stand in: the window itself,
+    less the private time kept out of it."""
+    opens, closes = minutes(report["earliest"]), minutes(report["latest"])
+    free, cursor = [], opens
+    for start, end in sorted(busy):
+        if start > cursor:
+            free.append([cursor, min(start, closes)])
+        cursor = max(cursor, end)
+        if cursor >= closes:
+            break
+    if cursor < closes:
+        free.append([cursor, closes])
+    return [room for room in free if room[1] > room[0]]
+
+
+def fill(free: list, total: int, report: dict, midday: int = 0) -> list:
+    """Lay `total` minutes into `free`, in order: blocks of at most
+    `maxBlockMinutes` with a break between them, and the first one ending at
+    `midday` when one is given.
+
+    A stretch that was left out is itself a gap, so crossing one is a break
+    already when it is long enough to be one; a shorter one is topped up at the
+    start of the next room. What does not fit is left unplaced, and the caller
+    is the one that has to say so."""
+    blocks, remaining, owed = [], total, 0
+    for index, (opens, closes) in enumerate(free):
+        cursor = opens + owed if index else opens
+        owed = 0
+        while remaining > 0 and cursor < closes:
+            block = min(report["maxBlockMinutes"], remaining, closes - cursor)
+            if midday and not blocks:
+                block = min(block, max(midday - cursor, 0))
+            if block <= 0:
+                break
+            blocks.append([cursor, cursor + block])
+            cursor += block + report["breakMinutes"]
+            remaining -= block
+        if remaining <= 0:
+            break
+        if index + 1 < len(free):
+            # The break the next block owes, less the gap that was skipped.
+            owed = max(0, report["breakMinutes"] - (free[index + 1][0] - closes))
+    return blocks
+
+
+def capacity(report: dict, busy: list = ()) -> int:
+    """The most minutes one day can hold: blocks and breaks inside the window,
+    going round the private time kept out of it."""
+    free = rooms(report, list(busy))
     held = 0
-    while window > 0:
-        block = min(report["maxBlockMinutes"], window)
-        held += block
-        window -= block + report["breakMinutes"]
+    for index, (opens, closes) in enumerate(free):
+        window = closes - opens
+        if index:
+            window -= max(0, report["breakMinutes"] - (opens - free[index - 1][1]))
+        while window > 0:
+            block = min(report["maxBlockMinutes"], window)
+            held += block
+            window -= block + report["breakMinutes"]
     return held
 
 
@@ -325,7 +447,43 @@ def blocks_from(start: int, total: int, report: dict, midday: int = 0) -> list:
     return blocks
 
 
-def layout(start: int, total: int, report: dict) -> list:
+def layout_around(start: int, total: int, report: dict, busy: list) -> list:
+    """The same as `layout`, on a day with private time the blocks go round.
+
+    The day still starts where it started: the rooms before the anchor are left
+    alone while the rest can hold the hours. When they cannot, the day reaches
+    back into them, the way a day that would run past `latest` is moved earlier
+    as a whole.
+
+    Lunch is placed as it is on any other day, unless a stretch that was left
+    out already falls in the lunch window: that stretch is the break, and
+    another one in the same hour would be asking twice."""
+    free = rooms(report, busy)
+    after = [[max(opens, start), closes] for opens, closes in free if closes > start]
+    if sum(closes - opens for opens, closes in after) < total:
+        after = free
+    if not after:
+        return []
+    midday = 0
+    lunch = report.get("lunch")
+    if lunch and not any(
+        end > minutes(lunch["earliest"]) and begins < minutes(lunch["latest"]) for begins, end in busy
+    ):
+        midday = lunch_end(after[0][0], total, report)
+        if midday > after[0][1]:
+            midday = 0
+    blocks = fill(after, total, report, midday)
+    if midday and placed(blocks) < total:
+        blocks = fill(after, total, report)
+    return blocks
+
+
+def placed(blocks: list) -> int:
+    """The minutes a layout has found room for."""
+    return sum(end - start for start, end in blocks)
+
+
+def layout(start: int, total: int, report: dict, busy: list = ()) -> list:
     """Blocks of at most maxBlockMinutes with a break between, ending no later
     than `latest`; shifted earlier as a whole when they would.
 
@@ -337,7 +495,12 @@ def layout(start: int, total: int, report: dict) -> list:
     in with: a day that has to be shifted earlier to fit would otherwise carry
     its lunch break out of the window with it. A day that cannot hold the extra
     break the split costs keeps the plain layout, where the break falls where
-    it falls and every block is still the length it should be."""
+    it falls and every block is still the length it should be.
+
+    With `busy` the day has private stretches in it that no block may cover,
+    and `layout_around` is what lays it out."""
+    if busy:
+        return layout_around(start, total, report, list(busy))
     plain = blocks_from(start, total, report)
     if plain:
         overshoot = plain[-1][1] - latest_minute(report)
@@ -357,28 +520,41 @@ def layout(start: int, total: int, report: dict) -> list:
 def propose(days: dict, report: dict) -> tuple:
     """Redistribute the week's work onto its workdays.
 
-    Every recorded minute is kept and none is invented. A workday keeps its own
-    hours up to the day's capacity; what does not fit, and everything from the
-    other days, is dealt out to the workdays with the fewest hours first. What
-    still finds no room is returned as the leftover, so it is seen rather than
-    lost.
+    Every recorded minute is kept and none is invented, and no minute spent
+    privately is in here at all: `summarise` has already taken those out of the
+    hours, and the longer stretches are kept out of the blocks as well, so a
+    booking never stands over an hour that was not work. A workday keeps its
+    own hours up to the day's capacity; what does not fit, and everything from
+    the other days, is dealt out to the workdays with the fewest hours first.
+    What still finds no room is returned as the leftover, so it is seen rather
+    than lost.
     """
-    cap = capacity(report)
     workdays = [day for day in sorted(days) if day.isoweekday() in report["workdays"]]
+    busy = {day: kept_out(days[day], report) for day in workdays}
+    caps = {day: capacity(report, busy[day]) for day in workdays}
     recorded = {day: days[day]["work"] // 60 for day in days}
-    booked = {day: min(recorded[day], cap) for day in workdays}
+    booked = {day: min(recorded[day], caps[day]) for day in workdays}
     pool = sum(recorded[day] for day in days if day not in booked)
     pool += sum(recorded[day] - booked[day] for day in workdays)
     eligible = [day for day in workdays if recorded[day] > 0 or report["fillEmptyDays"]]
     while pool > 0:
-        room = [day for day in eligible if booked[day] < cap]
+        room = [day for day in eligible if booked[day] < caps[day]]
         if not room:
             break
         day = min(room, key=lambda d: (booked[d], d))
-        added = min(CHUNK_MINUTES, pool, cap - booked[day])
+        added = min(CHUNK_MINUTES, pool, caps[day] - booked[day])
         booked[day] += added
         pool -= added
-    blocks = {day: layout(anchor(days[day], report), booked[day], report) for day in workdays}
+    blocks = {}
+    for day in workdays:
+        blocks[day] = layout(anchor(days[day], report), booked[day], report, busy[day])
+        # The blocks are what the day is booked as. A minute the layout could
+        # not stand anywhere is not booked, and it goes back to being leftover
+        # rather than being counted twice.
+        short = booked[day] - placed(blocks[day])
+        if short > 0:
+            booked[day] -= short
+            pool += short
     return blocks, booked, pool
 
 

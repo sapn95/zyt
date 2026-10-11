@@ -208,6 +208,16 @@ no room is printed as the leftover rather than dropped
 ([ADR 0006](docs/adr/0006-the-proposal-moves-minutes-it-never-makes-them.md)).
 `zyt day` is one day of the same; `--json` on either gives it to a script.
 
+**No private minute is in the booking.** A minute recorded as private is not a
+work minute, even when something else says it is: a meeting is written as one
+stretch and the keyboard goes on recording underneath it, so a private message
+answered in a meeting arrives as both, and work is what is left of it. A
+private stretch of `skipPrivateMinutes` or more is kept out of the blocks as
+well, so no block stands over it; shorter ones are left alone, because private
+time on a workday arrives as slivers and a block cut at every one of them
+would be twenty blocks nobody can book
+([ADR 0014](docs/adr/0014-a-private-minute-is-not-a-work-minute.md)).
+
 ## The board
 
 ```sh

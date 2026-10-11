@@ -52,6 +52,7 @@ run.
 | `breakMinutes` | `30` | The break between two blocks |
 | `defaultStart` | `"08:00"` | Where a day with no recorded start begins |
 | `fillEmptyDays` | `false` | Whether a workday with no recorded work may receive moved hours |
+| `skipPrivateMinutes` | `30` | A private stretch at least this long is kept out of the blocks; `null` keeps every stretch out, however short |
 
 How these turn a recorded week into a proposal is in
 [ADR 0006](adr/0006-the-proposal-moves-minutes-it-never-makes-them.md).
