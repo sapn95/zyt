@@ -230,8 +230,10 @@ def spans(segments: list) -> list:
 
 
 def without(stretches: list, holes: list) -> list:
-    """`stretches` with every minute of `holes` taken out of them. Both are
-    merged and in order, as `spans` returns them."""
+    """`stretches` with every minute of `holes` taken out of them. The holes
+    are put in order here rather than being assumed to be in it: a caller that
+    hands them over unsorted would otherwise keep the ones that came late."""
+    holes = sorted(holes)
     out = []
     for start, end in stretches:
         cursor = start
@@ -257,16 +259,22 @@ def covered(segments: list) -> int:
     return seconds(spans(segments))
 
 
-def minute_of(moment) -> int:
-    """A moment as minutes from its own midnight."""
-    return moment.hour * 60 + moment.minute
+def minute_span(start, end) -> dict:
+    """A stretch as minutes from the midnight its day began at, with the whole
+    minute it ends in included: a stretch kept out of the booking keeps every
+    second of itself out, at both ends. Measured from that one midnight rather
+    than from each end's own, because a stretch that runs to midnight ends at
+    00:00 of the day after and 00:00 is not before 23:00.
 
-
-def minute_after(moment) -> int:
-    """The same, rounded up to the whole minute it ends in. A stretch kept out
-    of the booking keeps every second of itself out, at both ends."""
-    extra = 1 if moment.second or moment.microsecond else 0
-    return min(minute_of(moment) + extra, 24 * 60)
+    `seconds` is what it really lasted, which is what a length is compared
+    against. The minutes are the shape it takes up and are rounded outwards,
+    so a stretch of 29 minutes and 50 seconds would otherwise count as 31.
+    """
+    midnight = dt.datetime.combine(start.date(), dt.time(), tzinfo=start.tzinfo)
+    begins = int((start - midnight).total_seconds()) // 60
+    lasts = int((end - midnight).total_seconds())
+    ends = min(-(-lasts // 60), 24 * 60)
+    return {"from": begins, "to": ends, "seconds": int((end - start).total_seconds())}
 
 
 def summarise(day_segments: list) -> dict:
@@ -293,7 +301,7 @@ def summarise(day_segments: list) -> dict:
         "work": seconds(at_work),
         "private": covered(private),
         # Minutes from midnight, because that is what the proposal works in.
-        "privateAt": [[minute_of(start), minute_after(end)] for start, end in private_spans],
+        "privateAt": [minute_span(start, end) for start, end in private_spans],
         "break": longest_break,
     }
 
@@ -327,9 +335,15 @@ def kept_out(summary: dict, report: dict) -> list:
         floor = 0
     opens, closes = minutes(report["earliest"]), minutes(report["latest"])
     out = []
-    for start, end in summary.get("privateAt") or []:
-        start, end = max(start, opens), min(end, closes)
-        if end - start >= max(floor, 1):
+    for stretch in summary.get("privateAt") or []:
+        start, end = max(stretch["from"], opens), min(stretch["to"], closes)
+        if end <= start:
+            continue
+        # The minutes are rounded outwards and the seconds are not, so the
+        # shorter of the two is the length. A stretch that hangs over an end of
+        # the window is as long as the part inside it.
+        lasted = min(stretch["seconds"], (end - start) * 60)
+        if lasted >= max(floor, 1) * 60:
             out.append([start, end])
     return out
 
@@ -460,21 +474,34 @@ def layout_around(start: int, total: int, report: dict, busy: list) -> list:
     another one in the same hour would be asking twice."""
     free = rooms(report, busy)
     after = [[max(opens, start), closes] for opens, closes in free if closes > start]
-    if sum(closes - opens for opens, closes in after) < total:
-        after = free
-    if not after:
+    if not after and not free:
         return []
-    midday = 0
     lunch = report.get("lunch")
-    if lunch and not any(
+    asked = lunch is not None and not any(
         end > minutes(lunch["earliest"]) and begins < minutes(lunch["latest"]) for begins, end in busy
-    ):
-        midday = lunch_end(after[0][0], total, report)
-        if midday > after[0][1]:
+    )
+
+    def best(spare: list) -> list:
+        if not spare:
+            return []
+        midday = lunch_end(spare[0][0], total, report) if asked else 0
+        if midday > spare[0][1]:
             midday = 0
-    blocks = fill(after, total, report, midday)
-    if midday and placed(blocks) < total:
-        blocks = fill(after, total, report)
+        blocks = fill(spare, total, report, midday)
+        if midday and placed(blocks) < total:
+            blocks = fill(spare, total, report)
+        return blocks
+
+    # The hours go after the start where they fit. Whether they fit is what the
+    # layout says and not what the rooms add up to: the breaks take their own
+    # minutes out of a room, so rooms as long as the hours can still be too
+    # short for them. When they are, the day reaches back into the morning,
+    # the way a day that would run past `latest` is moved earlier as a whole.
+    blocks = best(after)
+    if placed(blocks) < total:
+        whole = best(free)
+        if placed(whole) > placed(blocks):
+            return whole
     return blocks
 
 
@@ -517,6 +544,20 @@ def layout(start: int, total: int, report: dict, busy: list = ()) -> list:
     return plain
 
 
+def deal(pool: int, booked: dict, caps: dict, eligible: list) -> int:
+    """Hand the pool out to the days with the fewest hours first, a chunk at a
+    time, and answer with what found no room."""
+    while pool > 0:
+        room = [day for day in eligible if booked[day] < caps[day]]
+        if not room:
+            break
+        day = min(room, key=lambda d: (booked[d], d))
+        added = min(CHUNK_MINUTES, pool, caps[day] - booked[day])
+        booked[day] += added
+        pool -= added
+    return pool
+
+
 def propose(days: dict, report: dict) -> tuple:
     """Redistribute the week's work onto its workdays.
 
@@ -537,24 +578,30 @@ def propose(days: dict, report: dict) -> tuple:
     pool = sum(recorded[day] for day in days if day not in booked)
     pool += sum(recorded[day] - booked[day] for day in workdays)
     eligible = [day for day in workdays if recorded[day] > 0 or report["fillEmptyDays"]]
-    while pool > 0:
+    pool = deal(pool, booked, caps, eligible)
+    # The blocks are what a day is booked as, so the layout has the last word
+    # on the figure. A minute it could not stand anywhere goes back into the
+    # pool and is dealt out again, to a day that can hold it; the day it came
+    # from keeps what was laid out as its ceiling, so the same minute cannot
+    # come back to it and bounce for ever. What no day can place is the
+    # leftover, which is the one thing this function is allowed to lose.
+    blocks = {}
+    while True:
+        short = 0
+        for day in workdays:
+            blocks[day] = layout(anchor(days[day], report), booked[day], report, busy[day])
+            missing = booked[day] - placed(blocks[day])
+            if missing > 0:
+                booked[day] = placed(blocks[day])
+                caps[day] = booked[day]
+                short += missing
+        if short == 0:
+            break
+        pool += short
         room = [day for day in eligible if booked[day] < caps[day]]
         if not room:
             break
-        day = min(room, key=lambda d: (booked[d], d))
-        added = min(CHUNK_MINUTES, pool, caps[day] - booked[day])
-        booked[day] += added
-        pool -= added
-    blocks = {}
-    for day in workdays:
-        blocks[day] = layout(anchor(days[day], report), booked[day], report, busy[day])
-        # The blocks are what the day is booked as. A minute the layout could
-        # not stand anywhere is not booked, and it goes back to being leftover
-        # rather than being counted twice.
-        short = booked[day] - placed(blocks[day])
-        if short > 0:
-            booked[day] -= short
-            pool += short
+        pool = deal(pool, booked, caps, eligible)
     return blocks, booked, pool
 
 

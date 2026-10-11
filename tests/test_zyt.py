@@ -35,6 +35,11 @@ def at(day: str, clock: str) -> dt.datetime:
     return dt.datetime.fromisoformat(f"{day}T{clock}:00+02:00")
 
 
+def private_from(first: int, last: int) -> dict:
+    """One stretch of a day's `privateAt`, in minutes from its midnight."""
+    return {"from": first, "to": last, "seconds": (last - first) * 60}
+
+
 def seg(day: str, start: str, end: str, cls: str = "work") -> zyt.Segment:
     end_day = day
     if end < start:  # over midnight
@@ -112,7 +117,7 @@ class PrivateIsNotWork(unittest.TestCase):
         summary = zyt.summarise(day)
         self.assertEqual(summary["work"], 90 * 60)
         self.assertEqual(summary["private"], 30 * 60)
-        self.assertEqual(summary["privateAt"], [[9 * 60 + 40, 10 * 60 + 10]])
+        self.assertEqual(summary["privateAt"], [{"from": 9 * 60 + 40, "to": 10 * 60 + 10, "seconds": 1800}])
 
     def test_the_day_starts_and_ends_at_work(self):
         day = [
@@ -139,8 +144,29 @@ class PrivateIsNotWork(unittest.TestCase):
                 "private",
             ),
         ]
-        # 09:40:30 to 09:41:20 is the minutes 09:40 and 09:41, both of them
-        self.assertEqual(zyt.summarise(day)["privateAt"], [[9 * 60 + 40, 9 * 60 + 42]])
+        # 09:40:30 to 09:41:20 is the minutes 09:40 and 09:41, both of them,
+        # and it lasted the fifty seconds it lasted
+        self.assertEqual(zyt.summarise(day)["privateAt"], [{"from": 9 * 60 + 40, "to": 9 * 60 + 42, "seconds": 50}])
+
+    def test_a_stretch_that_runs_to_midnight_ends_at_the_end_of_the_day(self):
+        day = [seg("2026-09-14", "23:00", "00:00", "private")]
+        # 00:00 belongs to the day after and is not before 23:00
+        self.assertEqual(zyt.summarise(day)["privateAt"], [{"from": 23 * 60, "to": 24 * 60, "seconds": 3600}])
+
+    def test_without_puts_the_holes_in_order_itself(self):
+        whole = [[at("2026-09-14", "08:00"), at("2026-09-14", "13:00")]]
+        holes = [
+            [at("2026-09-14", "11:00"), at("2026-09-14", "12:00")],
+            [at("2026-09-14", "09:00"), at("2026-09-14", "09:30")],
+        ]
+        self.assertEqual(
+            zyt.without(whole, holes),
+            [
+                [at("2026-09-14", "08:00"), at("2026-09-14", "09:00")],
+                [at("2026-09-14", "09:30"), at("2026-09-14", "11:00")],
+                [at("2026-09-14", "12:00"), at("2026-09-14", "13:00")],
+            ],
+        )
 
     def test_without_takes_the_holes_out_of_the_stretches(self):
         whole = [[at("2026-09-14", "08:00"), at("2026-09-14", "12:00")]]
@@ -160,7 +186,7 @@ class PrivateIsNotWork(unittest.TestCase):
 
 class KeptOut(unittest.TestCase):
     def summary(self, *spans):
-        return {"privateAt": [list(span) for span in spans]}
+        return {"privateAt": [private_from(first, last) for first, last in spans]}
 
     def test_only_a_stretch_long_enough_to_be_a_break(self):
         summary = self.summary([9 * 60, 9 * 60 + 29], [14 * 60, 14 * 60 + 45])
@@ -182,6 +208,14 @@ class KeptOut(unittest.TestCase):
 
     def test_a_day_with_no_private_time_keeps_nothing_out(self):
         self.assertEqual(zyt.kept_out({}, REPORT), [])
+
+    def test_the_floor_is_about_what_the_stretch_lasted_not_what_it_covers(self):
+        # 09:10:30 to 09:40:20 is twenty-nine minutes and fifty seconds, drawn
+        # over thirty-one minutes of the clock. It is not half an hour.
+        nearly = {"privateAt": [{"from": 550, "to": 581, "seconds": 29 * 60 + 50}]}
+        self.assertEqual(zyt.kept_out(nearly, REPORT), [])
+        half = {"privateAt": [{"from": 550, "to": 581, "seconds": 30 * 60}]}
+        self.assertEqual(zyt.kept_out(half, REPORT), [[550, 581]])
 
 
 class Rooms(unittest.TestCase):
@@ -261,6 +295,14 @@ class LayoutAroundPrivate(unittest.TestCase):
         self.assertEqual(zyt.placed(blocks), 8 * 60)
         self.assertLess(blocks[0][0], 17 * 60)
 
+    def test_a_day_reaches_back_when_the_breaks_leave_too_little_room(self):
+        # The rooms after the start add up to the hours and still cannot hold
+        # them, because a break goes between every two blocks.
+        report = {**REPORT, "earliest": "08:00", "latest": "18:00", "maxBlockMinutes": 60, "breakMinutes": 30}
+        blocks = zyt.layout(13 * 60, 300, report, [[12 * 60, 12 * 60 + 30]])
+        self.assertEqual(zyt.placed(blocks), 300)
+        self.assertLess(blocks[0][0], 13 * 60)
+
     def test_what_cannot_be_placed_is_left_unplaced(self):
         blocks = zyt.layout(8 * 60, 12 * 60, self.REPORT, [[9 * 60, 19 * 60]])
         self.assertLess(zyt.placed(blocks), 12 * 60)
@@ -287,7 +329,7 @@ class ProposeAroundPrivate(unittest.TestCase):
     def test_a_private_afternoon_takes_the_hours_to_the_other_days(self):
         days = week(mon=600, tue=300, wed=300, thu=300, fri=300)
         monday = dt.date(2026, 9, 14)
-        days[monday]["privateAt"] = [[13 * 60, 18 * 60]]
+        days[monday]["privateAt"] = [private_from(13 * 60, 18 * 60)]
         blocks, booked, leftover = zyt.propose(days, REPORT)
         self.assertEqual(leftover, 0)
         # Monday holds what is left of its window, and the rest of its hours
@@ -301,18 +343,33 @@ class ProposeAroundPrivate(unittest.TestCase):
     def test_a_day_that_was_private_all_day_books_nothing(self):
         days = week(mon=120, tue=300)
         monday = dt.date(2026, 9, 14)
-        days[monday]["privateAt"] = [[0, 24 * 60]]
+        days[monday]["privateAt"] = [private_from(0, 24 * 60)]
         blocks, booked, leftover = zyt.propose(days, REPORT)
         self.assertEqual(blocks[monday], [])
         self.assertEqual(booked[monday], 0)
         self.assertEqual(sum(booked.values()), 420)
         self.assertEqual(leftover, 0)
 
+    def test_minutes_no_day_could_place_are_offered_to_the_other_days(self):
+        # Monday's afternoon is private, so its layout holds less than its
+        # hours. What it cannot place is dealt out again rather than becoming
+        # leftover while Tuesday still has room.
+        report = {**REPORT, "earliest": "08:00", "latest": "18:00", "maxBlockMinutes": 60, "breakMinutes": 30}
+        days = week(mon=300, tue=60)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["privateAt"] = [private_from(12 * 60, 12 * 60 + 30)]
+        days[monday]["start"] = at(monday.isoformat(), "13:00")
+        blocks, booked, leftover = zyt.propose(days, report)
+        self.assertEqual(sum(booked.values()) + leftover, 360)
+        self.assertEqual(leftover, 0)
+        for day, day_blocks in blocks.items():
+            self.assertEqual(zyt.placed(day_blocks), booked[day])
+
     def test_a_sliver_leaves_the_day_as_it_was(self):
         days = week(mon=480, tue=480)
         monday = dt.date(2026, 9, 14)
         plain = zyt.propose({day: dict(summary) for day, summary in days.items()}, REPORT)
-        days[monday]["privateAt"] = [[10 * 60, 10 * 60 + 3]]
+        days[monday]["privateAt"] = [private_from(10 * 60, 10 * 60 + 3)]
         self.assertEqual(zyt.propose(days, REPORT), plain)
 
 

@@ -35,7 +35,9 @@ claims that hour.
 
 **A minute recorded as private is not a work minute.** `summarise` takes the
 private stretches out of the work stretches before it adds them up, so the
-figure every other part reads has nothing private in it. The private figure is
+figure every other part reads has nothing private in it. The Spoon's own
+`totals.forDay` does the same, because the menu bar and the report have to say
+one thing. The private figure is
 unchanged: that time was private and is still counted as private. The day's
 start and end are the first and last minute of what is left, so a day that
 began with half an hour of private reading starts when the work does.
@@ -47,6 +49,15 @@ that was skipped is itself a gap, so crossing one is the break already when it
 is at least `breakMinutes` long; a shorter one is topped up at the start of
 the next room. Lunch is placed as before, unless a skipped stretch already
 falls in the lunch window, in which case that stretch is lunch.
+
+**A stretch is as long as it lasted, not as long as it is drawn.** The minutes
+a stretch covers are rounded outwards, so that a block never stands on a
+second of it, and twenty-nine minutes and fifty seconds is drawn over
+thirty-one minutes of the clock. The length the floor is compared against is
+the seconds, so that stretch is not half an hour. A stretch hanging over an
+end of the window is as long as the part inside it. The minutes are counted
+from the midnight the stretch's own day began at, because one that runs to
+midnight ends at 00:00 of the day after and 00:00 is not before 23:00.
 
 **Short stretches are left alone**, and `skipPrivateMinutes` (default 30) is
 where the line is. This is the part that could have been got wrong by being
@@ -66,6 +77,26 @@ drop in the right direction. A day whose capacity shrinks hands its hours to
 the other workdays the way a day over capacity always has, and what no day can
 hold is the leftover, printed rather than dropped
 ([ADR 0006](0006-the-proposal-moves-minutes-it-never-makes-them.md)).
+
+Two things about that handing over are worth writing down, because the first
+draft of this got both wrong and a review found them.
+
+**Rooms as long as the hours can still be too short for them**, since the
+breaks take their minutes out of a room rather than out of the hours. Whether
+the day fits after its own start is therefore what the layout says and not
+what the rooms add up to: when the hours do not fit after the start, the day
+reaches back into the morning, the way a day that would run past `latest` is
+moved earlier as a whole.
+
+**The layout has the last word on the figure.** A minute it could not stand
+anywhere goes back into the pool and is dealt out again, to a day that can
+hold it, and the day it came from keeps what was laid out as its ceiling so
+the same minute cannot bounce back to it for ever. Only what no day can place
+is the leftover.
+
+The board's recorded lane is left as it is: it draws what the sources wrote,
+overlap and all, which is how the private sliver inside a meeting can be seen
+at all. The figures beside it say what counts.
 
 ## What was rejected
 
