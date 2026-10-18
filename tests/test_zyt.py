@@ -36,8 +36,8 @@ def at(day: str, clock: str) -> dt.datetime:
 
 
 def private_from(first: int, last: int) -> dict:
-    """One stretch of a day's `privateAt`, in minutes from its midnight."""
-    return {"from": first, "to": last, "seconds": (last - first) * 60}
+    """One stretch of a day's `privateAt`, from whole minutes of its day."""
+    return {"from": first, "to": last, "first": first * 60, "last": last * 60}
 
 
 def seg(day: str, start: str, end: str, cls: str = "work") -> zyt.Segment:
@@ -117,7 +117,10 @@ class PrivateIsNotWork(unittest.TestCase):
         summary = zyt.summarise(day)
         self.assertEqual(summary["work"], 90 * 60)
         self.assertEqual(summary["private"], 30 * 60)
-        self.assertEqual(summary["privateAt"], [{"from": 9 * 60 + 40, "to": 10 * 60 + 10, "seconds": 1800}])
+        self.assertEqual(
+            summary["privateAt"],
+            [{"from": 9 * 60 + 40, "to": 10 * 60 + 10, "first": 34800, "last": 36600}],
+        )
 
     def test_the_day_starts_and_ends_at_work(self):
         day = [
@@ -146,12 +149,18 @@ class PrivateIsNotWork(unittest.TestCase):
         ]
         # 09:40:30 to 09:41:20 is the minutes 09:40 and 09:41, both of them,
         # and it lasted the fifty seconds it lasted
-        self.assertEqual(zyt.summarise(day)["privateAt"], [{"from": 9 * 60 + 40, "to": 9 * 60 + 42, "seconds": 50}])
+        self.assertEqual(
+            zyt.summarise(day)["privateAt"],
+            [{"from": 9 * 60 + 40, "to": 9 * 60 + 42, "first": 34830, "last": 34880}],
+        )
 
     def test_a_stretch_that_runs_to_midnight_ends_at_the_end_of_the_day(self):
         day = [seg("2026-09-14", "23:00", "00:00", "private")]
         # 00:00 belongs to the day after and is not before 23:00
-        self.assertEqual(zyt.summarise(day)["privateAt"], [{"from": 23 * 60, "to": 24 * 60, "seconds": 3600}])
+        self.assertEqual(
+            zyt.summarise(day)["privateAt"],
+            [{"from": 23 * 60, "to": 24 * 60, "first": 82800, "last": 86400}],
+        )
 
     def test_without_puts_the_holes_in_order_itself(self):
         whole = [[at("2026-09-14", "08:00"), at("2026-09-14", "13:00")]]
@@ -212,9 +221,9 @@ class KeptOut(unittest.TestCase):
     def test_the_floor_is_about_what_the_stretch_lasted_not_what_it_covers(self):
         # 09:10:30 to 09:40:20 is twenty-nine minutes and fifty seconds, drawn
         # over thirty-one minutes of the clock. It is not half an hour.
-        nearly = {"privateAt": [{"from": 550, "to": 581, "seconds": 29 * 60 + 50}]}
+        nearly = {"privateAt": [{"from": 550, "to": 581, "first": 550 * 60, "last": 550 * 60 + 29 * 60 + 50}]}
         self.assertEqual(zyt.kept_out(nearly, REPORT), [])
-        half = {"privateAt": [{"from": 550, "to": 581, "seconds": 30 * 60}]}
+        half = {"privateAt": [{"from": 550, "to": 581, "first": 550 * 60, "last": 550 * 60 + 30 * 60}]}
         self.assertEqual(zyt.kept_out(half, REPORT), [[550, 581]])
 
 
@@ -282,8 +291,31 @@ class PrivateUnderTheBooking(unittest.TestCase):
 
     def test_it_is_never_longer_than_the_stretch_lasted(self):
         # drawn over two minutes of the clock, fifty seconds long
-        summary = {"privateAt": [{"from": 9 * 60, "to": 9 * 60 + 2, "seconds": 50}]}
+        summary = {"privateAt": [{"from": 9 * 60, "to": 9 * 60 + 2, "first": 9 * 3600, "last": 9 * 3600 + 50}]}
         self.assertEqual(zyt.private_under(summary, [[8 * 60, 12 * 60]]), 50)
+
+    def test_two_blocks_over_one_minute_are_one_minute(self):
+        # No layout hands these over, and the figure holds if one ever does.
+        summary = {"privateAt": [private_from(10 * 60, 10 * 60 + 30)]}
+        self.assertEqual(zyt.private_under(summary, [[10 * 60, 10 * 60 + 15], [10 * 60, 10 * 60 + 15]]), 15 * 60)
+
+    def test_something_shorter_than_a_minute_says_so(self):
+        self.assertEqual(zyt.fmt_small(59), "under a minute")
+        self.assertEqual(zyt.fmt_small(60), "0h01")
+        self.assertEqual(zyt.fmt_small(0), "under a minute")
+
+    def test_the_report_says_under_a_minute_rather_than_nothing(self):
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["privateAt"] = [{"from": 540, "to": 541, "first": 9 * 3600 + 30, "last": 9 * 3600 + 35}]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        text = zyt.render_week(monday, days, blocks, booked, leftover)
+        self.assertIn("under a minute of it is under a block", text)
+
+    def test_a_second_over_a_block_boundary_is_a_second(self):
+        # the block ends at 09:01, the stretch runs 09:00:59 to 09:01:59
+        summary = {"privateAt": [{"from": 540, "to": 542, "first": 9 * 3600 + 59, "last": 9 * 3600 + 119}]}
+        self.assertEqual(zyt.private_under(summary, [[8 * 60, 9 * 60 + 1]]), 1)
 
     def test_nothing_private_and_nothing_booked_are_both_zero(self):
         self.assertEqual(zyt.private_under({}, [[8 * 60, 12 * 60]]), 0)

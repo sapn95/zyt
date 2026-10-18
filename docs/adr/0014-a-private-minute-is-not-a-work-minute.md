@@ -104,9 +104,22 @@ question it got was whether it was true. So `private_under` adds up the
 private time each day's blocks were drawn across; the report prints it under
 the totals, the board paints those minutes purple on the booking lane and
 names the amount beside the day, and `--json` carries it as
-`privateUnderBooking`. Measured on this machine: 0h58 in 2026-W41, 1h00 in
-W40 and 2h19 in W39, against weeks of about fifty hours. A figure that can be
-checked is worth more than one that has to be believed.
+`privateUnderBooking`. Measured on this machine with the code this decision
+describes: 0h58 in 2026-W41, 0h59 in W40, 2h19 in W39, against weeks of about
+fifty hours. A figure that can be checked is worth more than one that has to
+be believed.
+
+It measures what the blocks stand over, and it is not handed the stretches the
+layout kept out. The two agree today, because a block is never laid over a
+kept-out stretch, and that is the point: if the layout ever did, the figure
+would say so instead of repeating what the layout meant to do.
+
+The overlap is in seconds, against the stretch as it really was. A stretch is
+drawn over the whole minutes it touches, so that one lasting seconds is still
+visible on the lane, and its label names the seconds, so the bar does not
+claim the minute it is drawn across. A figure below a minute reads "under a
+minute" rather than `0h00`, which is the only honest thing for a mark that is
+on the screen.
 
 ## What was rejected
 
