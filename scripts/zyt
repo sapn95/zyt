@@ -162,27 +162,42 @@ def minutes(clock: str) -> int:
     return int(hours) * 60 + int(mins)
 
 
+def a_clock(path, label: str, value) -> int:
+    """`value` as minutes from midnight, or the file is wrong and says so.
+
+    `minutes` is the parser the rest of the code uses and it takes what it is
+    given: `"7:60"` comes back as 8 o'clock and `"08:00:00"` as a crash. Here
+    is where a rules file is read, so here is where a clock has to look like
+    one."""
+    if not isinstance(value, str) or not re.fullmatch(r"([01][0-9]|2[0-4]):[0-5][0-9]", value):
+        raise SystemExit(f'{path}: {label} has to be a clock such as "08:00", not {value!r}')
+    at = minutes(value)
+    if at > 24 * 60:
+        raise SystemExit(f"{path}: {label} is past the end of the day: {value}")
+    return at
+
+
 def check_window(path, report: dict) -> None:
-    """The day's two ends, before anything is worked out from them. `latest`
-    may be null, which is a day with no closing time; everything else has to be
-    a clock, and the day has to end after it starts. Without this a typo is a
-    silent answer: `""` or `0` read as no closing time at all, and `"00:00"`
-    closes the day before it opens and books nothing all week."""
-    opens = None
-    for key in ("earliest", "latest"):
-        value = report.get(key)
-        if key == "latest" and value is None:
-            continue
-        try:
-            at = minutes(value)
-        except (AttributeError, TypeError, ValueError):
-            raise SystemExit(f'{path}: report.{key} has to be a clock such as "08:00"') from None
-        if not 0 <= at <= 24 * 60:
-            raise SystemExit(f"{path}: report.{key} is not a time of day: {value}")
-        if key == "earliest":
-            opens = at
-        elif at <= opens:
-            raise SystemExit(f"{path}: report.latest ({value}) is not after report.earliest")
+    """Every time of day in the rules, before anything is worked out from
+    them. `latest` may be null, which is a day with no closing time; everything
+    else has to be a clock, and each pair has to end after it starts. Without
+    this a typo is a silent answer: `""` or `0` read as no closing time at all,
+    and `"00:00"` closes the day before it opens and books nothing all week."""
+    opens = a_clock(path, "report.earliest", report.get("earliest"))
+    if report.get("latest") is not None:
+        closes = a_clock(path, "report.latest", report.get("latest"))
+        if closes <= opens:
+            raise SystemExit(f"{path}: report.latest ({report['latest']}) is not after report.earliest")
+    a_clock(path, "report.defaultStart", report.get("defaultStart"))
+    lunch = report.get("lunch")
+    if lunch is None:
+        return
+    if not isinstance(lunch, dict):
+        raise SystemExit(f"{path}: report.lunch has to be a JSON object, or null for a day without one")
+    early = a_clock(path, "report.lunch.earliest", lunch.get("earliest"))
+    late = a_clock(path, "report.lunch.latest", lunch.get("latest"))
+    if late <= early:
+        raise SystemExit(f"{path}: report.lunch.latest ({lunch['latest']}) is not after report.lunch.earliest")
 
 
 def clock(total: int) -> str:
