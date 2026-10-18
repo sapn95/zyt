@@ -510,6 +510,26 @@ def placed(blocks: list) -> int:
     return sum(end - start for start, end in blocks)
 
 
+def private_under(summary: dict, blocks: list) -> int:
+    """The seconds of private time a day's blocks stand over.
+
+    None of it is booked: the hours come from `summarise`, which has already
+    taken every private second out of them, and a block is as long as the hours
+    are. It is the clock a block was drawn across that holds private minutes,
+    and the stretches too short to be kept out of the layout
+    (`skipPrivateMinutes`) are the ones that end up under one. Saying how many
+    is the only way the figure can be checked instead of believed.
+
+    A stretch under two blocks is counted once, and never for longer than it
+    lasted: the minutes it covers are rounded outwards and the seconds are not.
+    """
+    total = 0
+    for stretch in summary.get("privateAt") or []:
+        covered = sum(max(0, min(stretch["to"], end) - max(stretch["from"], start)) for start, end in blocks)
+        total += min(covered * 60, stretch["seconds"])
+    return total
+
+
 def layout(start: int, total: int, report: dict, busy: list = ()) -> list:
     """Blocks of at most maxBlockMinutes with a break between, ending no later
     than `latest`; shifted earlier as a whole when they would.
@@ -669,11 +689,12 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
         f"{'':11}{'recorded':<36}  {'proposal'}",
         f"{'day':<11}{'start':<7}{'end':<7}{'work':<7}{'private':<9}{'break':<6}  {'booking':<{width}}{'booked'}",
     ]
-    total_work = total_private = total_booked = 0
+    total_work = total_private = total_booked = total_under = 0
     for day in sorted(days):
         summary = days[day]
         total_work += summary["work"] // 60
         total_private += summary["private"] // 60
+        total_under += private_under(summary, blocks.get(day, []))
         amount = "-"
         if day in blocks:
             amount = fmt_m(booked[day])
@@ -688,6 +709,11 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
     if leftover is not None:
         footer += f"  ·  left over {fmt_m(leftover)}"
     lines.append(footer)
+    if total_under:
+        lines.append(
+            f"none of the private time is booked; {fmt_h(total_under)} of it is under a block, "
+            "in stretches too short to be laid round"
+        )
     return "\n".join(lines)
 
 
@@ -702,6 +728,10 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
                 "break": summary["break"],
                 "booking": [[clock(s), clock(e)] for s, e in blocks.get(day, [])],
                 "booked": booked.get(day, 0) * 60,
+                # Booked time is work only. This is the private time the blocks
+                # were drawn across, which is not the same thing and is said so
+                # that it can be checked.
+                "privateUnderBooking": private_under(summary, blocks.get(day, [])),
             }
             for day, summary in sorted(days.items())
         },
@@ -805,6 +835,7 @@ h1 { margin: 0; font-size: 1.5rem; font-weight: 640; letter-spacing: -0.015em; }
 .figures { font-size: 0.78rem; color: var(--dim); }
 .figures b { margin-right: 0.35rem; color: var(--ink); font-size: 0.95rem; font-weight: 600; }
 .booking { display: block; margin-top: 0.1rem; }
+.under { color: var(--private); }
 footer {
   display: flex;
   flex-wrap: wrap;
@@ -947,9 +978,20 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
             (start, end, "book", f"book {clock(start)} to {clock(end)}, {fmt_m(end - start)}")
             for start, end in blocks.get(day, [])
         ]
+        # Where a block was drawn across private time, the private time is drawn
+        # on top of it. None of it is booked — the hours are work only — and a
+        # mark on the block is what makes that checkable rather than claimed.
+        for stretch in summary.get("privateAt") or []:
+            for start, end in blocks.get(day, []):
+                over = (max(stretch["from"], start), min(stretch["to"], end))
+                if over[1] > over[0]:
+                    proposed.append((*over, "private", f"private {clock(over[0])} to {clock(over[1])}, not booked"))
+        under = private_under(summary, blocks.get(day, []))
         figures = f"<b>{fmt_h(summary['work'])}</b>"
         if summary["private"]:
             figures += f"<span>{fmt_h(summary['private'])} private</span>"
+        if under:
+            figures += f'<span class="under">{fmt_h(under)} under a block, unbooked</span>'
         if day in blocks:
             filled += booked[day]
             booking = " · ".join(f"{clock(start)}–{clock(end)}" for start, end in blocks[day]) or "nothing to book"
@@ -962,7 +1004,11 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
             f'<div class="lane">{bars(proposed, first, total)}</div></div>'
             f'<div class="figures">{figures}<span class="booking">{html.escape(booking)}</span></div></div>'
         )
-    totals = [(fmt_m(work), "recorded work"), (fmt_m(private), "private"), (fmt_m(filled), "booked")]
+    totals = [
+        (fmt_m(work), "recorded work"),
+        (fmt_m(private), "private"),
+        (fmt_m(filled), "booked, work only"),
+    ]
     if leftover is not None:
         totals.append((fmt_m(leftover), "left over"))
     return (
@@ -985,7 +1031,7 @@ def render_board(weeks: list, title: str) -> str:
     keys = [
         ("work", "at the keyboard"),
         (MEETING, "in a meeting"),
-        ("private", "private"),
+        ("private", "private, never booked"),
         ("book", "proposed booking"),
     ]
     source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)

@@ -265,6 +265,60 @@ class Layout(unittest.TestCase):
         self.assertEqual(zyt.layout(8 * 60, 0, REPORT), [])
 
 
+class PrivateUnderTheBooking(unittest.TestCase):
+    def test_the_minutes_a_block_was_drawn_across(self):
+        summary = {"privateAt": [private_from(9 * 60, 9 * 60 + 10), private_from(21 * 60, 21 * 60 + 30)]}
+        blocks = [[8 * 60, 12 * 60], [13 * 60, 18 * 60]]
+        # the morning sliver is under the first block; the evening one is after
+        # the working day and under nothing
+        self.assertEqual(zyt.private_under(summary, blocks), 10 * 60)
+
+    def test_a_stretch_under_two_blocks_is_counted_once(self):
+        summary = {"privateAt": [private_from(11 * 60, 14 * 60)]}
+        blocks = [[8 * 60, 12 * 60], [13 * 60, 18 * 60]]
+        # 11:00-12:00 and 13:00-14:00 are two hours of it, and the break
+        # between the blocks is not under anything
+        self.assertEqual(zyt.private_under(summary, blocks), 2 * 60 * 60)
+
+    def test_it_is_never_longer_than_the_stretch_lasted(self):
+        # drawn over two minutes of the clock, fifty seconds long
+        summary = {"privateAt": [{"from": 9 * 60, "to": 9 * 60 + 2, "seconds": 50}]}
+        self.assertEqual(zyt.private_under(summary, [[8 * 60, 12 * 60]]), 50)
+
+    def test_nothing_private_and_nothing_booked_are_both_zero(self):
+        self.assertEqual(zyt.private_under({}, [[8 * 60, 12 * 60]]), 0)
+        self.assertEqual(zyt.private_under({"privateAt": [private_from(9 * 60, 10 * 60)]}, []), 0)
+
+    def test_a_stretch_kept_out_of_the_layout_is_under_no_block(self):
+        report = {**REPORT, "earliest": "08:00", "latest": "20:00"}
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["privateAt"] = [private_from(13 * 60, 14 * 60)]
+        blocks, _, _ = zyt.propose(days, report)
+        self.assertEqual(zyt.private_under(days[monday], blocks[monday]), 0)
+
+    def test_the_report_says_it_under_the_totals(self):
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["privateAt"] = [private_from(9 * 60, 9 * 60 + 10)]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        text = zyt.render_week(monday, days, blocks, booked, leftover)
+        self.assertIn("none of the private time is booked; 0h10 of it is under a block", text)
+        # and a week with none of it says nothing at all
+        days[monday]["privateAt"] = []
+        text = zyt.render_week(monday, days, blocks, booked, leftover)
+        self.assertNotIn("under a block", text)
+
+    def test_the_json_carries_it_per_day(self):
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["privateAt"] = [private_from(9 * 60, 9 * 60 + 10)]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        shape = zyt.week_json(days, blocks, booked, leftover)
+        self.assertEqual(shape["days"]["2026-09-14"]["privateUnderBooking"], 600)
+        self.assertEqual(shape["days"]["2026-09-15"]["privateUnderBooking"], 0)
+
+
 class LayoutAroundPrivate(unittest.TestCase):
     REPORT = {**REPORT, "earliest": "07:00", "latest": "20:00", "breakMinutes": 30}
 

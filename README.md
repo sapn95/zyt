@@ -218,6 +218,19 @@ time on a workday arrives as slivers and a block cut at every one of them
 would be twenty blocks nobody can book
 ([ADR 0014](docs/adr/0014-a-private-minute-is-not-a-work-minute.md)).
 
+The slivers are still under a block on the clock, and the report says how many
+rather than leaving you to trust it:
+
+```text
+recorded 50h08 work, 5h26 private  ·  booked 50h00  ·  left over 0h08
+none of the private time is booked; 0h58 of it is under a block, in stretches
+too short to be laid round
+```
+
+The board draws the same thing: the stretches are painted purple on the
+booking lane where a block was drawn across them, the day's figures name the
+amount, and `--json` carries it per day as `privateUnderBooking`.
+
 ## The board
 
 ```sh
