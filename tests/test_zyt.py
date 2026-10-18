@@ -250,6 +250,45 @@ class Capacity(unittest.TestCase):
         self.assertEqual(zyt.capacity({**REPORT, "maxBlockMinutes": 60, "breakMinutes": 60}), 7 * 60)
 
 
+class NoClosingTime(unittest.TestCase):
+    REPORT = {**REPORT, "earliest": "08:00", "latest": None, "breakMinutes": 60}
+
+    def test_the_day_runs_to_midnight_instead(self):
+        self.assertEqual(zyt.latest_minute(self.REPORT), 24 * 60)
+        # 08:00 to midnight, two five-hour blocks and four hours after them
+        self.assertEqual(zyt.capacity(self.REPORT), 14 * 60)
+
+    def test_a_long_day_is_laid_out_past_the_evening(self):
+        blocks = zyt.layout(8 * 60, 11 * 60, self.REPORT)
+        self.assertEqual(blocks, [[480, 720], [780, 1080], [1140, 1260]])
+        self.assertEqual(zyt.placed(blocks), 11 * 60)
+
+    def test_a_week_that_would_not_fit_in_an_evening_is_booked_whole(self):
+        days = week(mon=660, tue=660, wed=660, thu=660, fri=660)
+        _, booked, leftover = zyt.propose(days, self.REPORT)
+        self.assertEqual(leftover, 0)
+        self.assertEqual(sum(booked.values()), 5 * 660)
+        # and the same week against a day that closes at 20:00 does not fit
+        closing = {**self.REPORT, "latest": "20:00"}
+        _, booked, leftover = zyt.propose(days, closing)
+        self.assertEqual(leftover, 5 * 660 - 5 * 600)
+
+    def test_the_start_is_not_pulled_to_an_end_that_is_not_there(self):
+        summary = {"start": at("2026-09-14", "21:15")}
+        self.assertEqual(zyt.anchor(summary, self.REPORT), 21 * 60 + 15)
+
+    def test_a_private_stretch_is_clipped_to_midnight(self):
+        summary = {"privateAt": [{"from": 23 * 60, "to": 24 * 60, "first": 82800, "last": 86400}]}
+        self.assertEqual(zyt.kept_out(summary, self.REPORT), [[23 * 60, 24 * 60]])
+
+    def test_the_board_scale_follows_the_day_rather_than_the_clock(self):
+        segments = {dt.date(2026, 9, 14): [seg("2026-09-14", "09:00", "17:00")]}
+        blocks = {dt.date(2026, 9, 14): [[9 * 60, 17 * 60]]}
+        self.assertEqual(zyt.scale(segments, blocks, self.REPORT), (8, 17))
+        # with a closing time the window is the floor under the scale
+        self.assertEqual(zyt.scale(segments, blocks, {**self.REPORT, "latest": "20:00"}), (8, 20))
+
+
 class Layout(unittest.TestCase):
     def test_a_day_that_fits_keeps_its_own_start(self):
         summary = {"start": at("2026-09-14", "08:02")}

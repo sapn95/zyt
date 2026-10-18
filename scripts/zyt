@@ -67,6 +67,9 @@ TITLE_MAX = 60
 REPORT_DEFAULTS = {
     "workdays": [1, 2, 3, 4, 5],
     "earliest": "07:00",
+    # No block ends after this. Null is a day with no closing time, for a
+    # record where the hours are the hours: the week is booked instead of
+    # leaving a remainder that no day would take.
     "latest": "20:00",
     "maxBlockMinutes": 300,
     "breakMinutes": 30,
@@ -346,7 +349,7 @@ def kept_out(summary: dict, report: dict) -> list:
     floor = report.get("skipPrivateMinutes")
     if floor is None:
         floor = 0
-    opens, closes = minutes(report["earliest"]), minutes(report["latest"])
+    opens, closes = minutes(report["earliest"]), latest_minute(report)
     out = []
     for stretch in summary.get("privateAt") or []:
         start, end = max(stretch["from"], opens), min(stretch["to"], closes)
@@ -364,7 +367,7 @@ def kept_out(summary: dict, report: dict) -> list:
 def rooms(report: dict, busy: list) -> list:
     """The stretches of the window a block may stand in: the window itself,
     less the private time kept out of it."""
-    opens, closes = minutes(report["earliest"]), minutes(report["latest"])
+    opens, closes = minutes(report["earliest"]), latest_minute(report)
     free, cursor = [], opens
     for start, end in sorted(busy):
         if start > cursor:
@@ -431,11 +434,16 @@ def anchor(summary: dict, report: dict) -> int:
         return minutes(report["defaultStart"])
     at = start.hour * 60 + start.minute
     at -= at % 5
-    return min(max(at, minutes(report["earliest"])), minutes(report["latest"]))
+    return min(max(at, minutes(report["earliest"])), latest_minute(report))
 
 
 def latest_minute(report: dict) -> int:
-    return minutes(report["latest"])
+    """The minute no block may end after. `null` is a day with no closing
+    time: the hours are what they are, and a week that does not fit inside an
+    evening is booked rather than reported as a remainder nobody can enter.
+    Midnight is the end either way, because a day ends.
+    """
+    return minutes(report["latest"]) if report.get("latest") else 24 * 60
 
 
 def lunch_end(start: int, total: int, report: dict) -> int:
@@ -894,8 +902,14 @@ def span_of(segment: Segment) -> tuple:
 def scale(segments: dict, blocks: dict, report: dict) -> tuple:
     """The first and last whole hour on show: the hours that may be booked,
     widened around anything recorded or proposed outside them. An evening on the
-    laptop is drawn where it happened rather than clipped off the end."""
-    first, last = minutes(report["earliest"]) // 60, -(-minutes(report["latest"]) // 60)
+    laptop is drawn where it happened rather than clipped off the end.
+
+    A day with no closing time has no hours it may not use, and taking that
+    for the scale would draw every week from dawn to midnight with the day
+    squeezed into the middle. Then the record and the proposal are the scale,
+    which is what they are for."""
+    first = minutes(report["earliest"]) // 60
+    last = -(-minutes(report["latest"]) // 60) if report.get("latest") else first + 1
     edges = [span_of(segment) for items in segments.values() for segment in items]
     edges += [(start, end) for items in blocks.values() for start, end in items]
     for start, end in edges:
