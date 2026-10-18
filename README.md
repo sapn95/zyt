@@ -228,8 +228,9 @@ too short to be laid round
 ```
 
 The board draws the same thing: the stretches are painted purple on the
-booking lane where a block was drawn across them, the day's figures name the
-amount, and `--json` carries it per day as `privateUnderBooking`.
+booking lane where a block was drawn across them, each one labelled with the
+seconds it really lasted, the day's figures name the amount, and `--json`
+carries it per day as `privateUnderBooking`.
 
 ## The board
 
