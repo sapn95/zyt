@@ -208,10 +208,12 @@ no room is printed as the leftover rather than dropped
 ([ADR 0006](docs/adr/0006-the-proposal-moves-minutes-it-never-makes-them.md)).
 
 A day holds what the window holds: `08:00` to `20:00` with five-hour blocks
-and an hour between them is ten hours, so a fifty-hour week leaves eight
-minutes over. Set `"latest": null` for a day with no closing time, and the
-week is booked whole. The board then draws the hours the days actually used
-rather than every hour to midnight.
+and an hour between them is ten hours, so five workdays hold fifty, and a week
+of 50h08 leaves eight minutes over. Set `"latest": null` for a day with no
+closing time, and the week is booked whole; a block may then end at `24:00`,
+which is midnight. The board draws the hours the days actually used rather
+than every hour to the end of the clock.
+
 `zyt day` is one day of the same; `--json` on either gives it to a script.
 
 **No private minute is in the booking.** A minute recorded as private is not a

@@ -47,7 +47,7 @@ run.
 | --- | --- | --- |
 | `workdays` | `[1,2,3,4,5]` | ISO weekdays that may be booked (1 is Monday) |
 | `earliest` | `"07:00"` | No block starts before this |
-| `latest` | `"20:00"` | No block ends after this; `null` for a day with no closing time, where the week is booked whole instead of leaving a remainder |
+| `latest` | `"20:00"` | No block ends after this; `null` for a day with no closing time, where the week is booked whole instead of leaving a remainder, and a block may end at `24:00` |
 | `maxBlockMinutes` | `300` | The longest block |
 | `breakMinutes` | `30` | The break between two blocks |
 | `defaultStart` | `"08:00"` | Where a day with no recorded start begins |
