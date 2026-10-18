@@ -144,6 +144,7 @@ def load_rules(path=None) -> dict:
         raise SystemExit(f"{path}: report has to be a JSON object")
     report = dict(REPORT_DEFAULTS)
     report.update(given)
+    check_window(path, report)
     rules["report"] = report
     given = rules.get("meetings")
     if given is None:
@@ -159,6 +160,29 @@ def load_rules(path=None) -> dict:
 def minutes(clock: str) -> int:
     hours, mins = clock.split(":")
     return int(hours) * 60 + int(mins)
+
+
+def check_window(path, report: dict) -> None:
+    """The day's two ends, before anything is worked out from them. `latest`
+    may be null, which is a day with no closing time; everything else has to be
+    a clock, and the day has to end after it starts. Without this a typo is a
+    silent answer: `""` or `0` read as no closing time at all, and `"00:00"`
+    closes the day before it opens and books nothing all week."""
+    opens = None
+    for key in ("earliest", "latest"):
+        value = report.get(key)
+        if key == "latest" and value is None:
+            continue
+        try:
+            at = minutes(value)
+        except (AttributeError, TypeError, ValueError):
+            raise SystemExit(f'{path}: report.{key} has to be a clock such as "08:00"') from None
+        if not 0 <= at <= 24 * 60:
+            raise SystemExit(f"{path}: report.{key} is not a time of day: {value}")
+        if key == "earliest":
+            opens = at
+        elif at <= opens:
+            raise SystemExit(f"{path}: report.latest ({value}) is not after report.earliest")
 
 
 def clock(total: int) -> str:
@@ -443,7 +467,7 @@ def latest_minute(report: dict) -> int:
     evening is booked rather than reported as a remainder nobody can enter.
     Midnight is the end either way, because a day ends.
     """
-    return minutes(report["latest"]) if report.get("latest") else 24 * 60
+    return 24 * 60 if report.get("latest") is None else minutes(report["latest"])
 
 
 def lunch_end(start: int, total: int, report: dict) -> int:
@@ -909,7 +933,7 @@ def scale(segments: dict, blocks: dict, report: dict) -> tuple:
     squeezed into the middle. Then the record and the proposal are the scale,
     which is what they are for."""
     first = minutes(report["earliest"]) // 60
-    last = -(-minutes(report["latest"]) // 60) if report.get("latest") else first + 1
+    last = first + 1 if report.get("latest") is None else -(-minutes(report["latest"]) // 60)
     edges = [span_of(segment) for items in segments.values() for segment in items]
     edges += [(start, end) for items in blocks.values() for start, end in items]
     for start, end in edges:
