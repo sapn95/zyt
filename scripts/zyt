@@ -162,6 +162,12 @@ def clock(total: int) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
+def second(total: int) -> str:
+    """Seconds from midnight as a clock that shows them, for a stretch whose
+    whole length is seconds."""
+    return f"{total // 3600:02d}:{total // 60 % 60:02d}:{total % 60:02d}"
+
+
 # ---------------------------------------------------------------------------
 # Intervals
 
@@ -266,15 +272,22 @@ def minute_span(start, end) -> dict:
     than from each end's own, because a stretch that runs to midnight ends at
     00:00 of the day after and 00:00 is not before 23:00.
 
-    `seconds` is what it really lasted, which is what a length is compared
-    against. The minutes are the shape it takes up and are rounded outwards,
-    so a stretch of 29 minutes and 50 seconds would otherwise count as 31.
+    `first` and `last` are the same two moments in seconds from that midnight,
+    which is the stretch as it really was. The minutes are the shape it takes
+    up and are rounded outwards, so a stretch of 29 minutes and 50 seconds
+    would otherwise count as 31, and an overlap of one second as a whole
+    minute. Both are kept: the minutes decide where a block may stand, the
+    seconds decide how long anything lasted.
     """
     midnight = dt.datetime.combine(start.date(), dt.time(), tzinfo=start.tzinfo)
-    begins = int((start - midnight).total_seconds()) // 60
-    lasts = int((end - midnight).total_seconds())
-    ends = min(-(-lasts // 60), 24 * 60)
-    return {"from": begins, "to": ends, "seconds": int((end - start).total_seconds())}
+    first = int((start - midnight).total_seconds())
+    last = int((end - midnight).total_seconds())
+    return {
+        "from": first // 60,
+        "to": min(-(-last // 60), 24 * 60),
+        "first": first,
+        "last": last,
+    }
 
 
 def summarise(day_segments: list) -> dict:
@@ -342,7 +355,7 @@ def kept_out(summary: dict, report: dict) -> list:
         # The minutes are rounded outwards and the seconds are not, so the
         # shorter of the two is the length. A stretch that hangs over an end of
         # the window is as long as the part inside it.
-        lasted = min(stretch["seconds"], (end - start) * 60)
+        lasted = min(stretch["last"] - stretch["first"], (end - start) * 60)
         if lasted >= max(floor, 1) * 60:
             out.append([start, end])
     return out
@@ -520,13 +533,22 @@ def private_under(summary: dict, blocks: list) -> int:
     (`skipPrivateMinutes`) are the ones that end up under one. Saying how many
     is the only way the figure can be checked instead of believed.
 
-    A stretch under two blocks is counted once, and never for longer than it
-    lasted: the minutes it covers are rounded outwards and the seconds are not.
+    The overlap is measured in seconds against the stretch as it really was,
+    not against the minutes it is drawn over: a block ending at 09:01 and a
+    stretch from 09:00:59 holds one second of it, not a minute. The blocks are
+    merged first, so a minute two of them stand over is one minute. A layout
+    does not hand over two blocks on one minute, and a figure that would be
+    wrong if it did is a figure nobody can lean on.
     """
-    total = 0
+    merged, total = [], 0
+    for start, end in sorted(blocks):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
     for stretch in summary.get("privateAt") or []:
-        covered = sum(max(0, min(stretch["to"], end) - max(stretch["from"], start)) for start, end in blocks)
-        total += min(covered * 60, stretch["seconds"])
+        for start, end in merged:
+            total += max(0, min(stretch["last"], end * 60) - max(stretch["first"], start * 60))
     return total
 
 
@@ -634,6 +656,12 @@ def fmt_h(seconds: int) -> str:
     return f"{total // 60}h{total % 60:02d}"
 
 
+def fmt_small(seconds: int) -> str:
+    """The same, except that something shorter than a minute says so rather
+    than printing as nothing at all."""
+    return fmt_h(seconds) if seconds >= 60 else "under a minute"
+
+
 def fmt_m(mins: int) -> str:
     return f"{mins // 60}h{mins % 60:02d}"
 
@@ -711,7 +739,7 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
     lines.append(footer)
     if total_under:
         lines.append(
-            f"none of the private time is booked; {fmt_h(total_under)} of it is under a block, "
+            f"none of the private time is booked; {fmt_small(total_under)} of it is under a block, "
             "in stretches too short to be laid round"
         )
     return "\n".join(lines)
@@ -983,15 +1011,26 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         # mark on the block is what makes that checkable rather than claimed.
         for stretch in summary.get("privateAt") or []:
             for start, end in blocks.get(day, []):
-                over = (max(stretch["from"], start), min(stretch["to"], end))
-                if over[1] > over[0]:
-                    proposed.append((*over, "private", f"private {clock(over[0])} to {clock(over[1])}, not booked"))
+                # Drawn over the whole minutes it touches, so that a stretch of
+                # seconds is still visible, and labelled with the seconds it
+                # really was, so that the bar does not claim the minute.
+                held = (max(stretch["first"], start * 60), min(stretch["last"], end * 60))
+                if held[1] <= held[0]:
+                    continue
+                proposed.append(
+                    (
+                        max(stretch["from"], start),
+                        min(stretch["to"], end),
+                        "private",
+                        f"private {second(held[0])} to {second(held[1])}, not booked",
+                    )
+                )
         under = private_under(summary, blocks.get(day, []))
         figures = f"<b>{fmt_h(summary['work'])}</b>"
         if summary["private"]:
             figures += f"<span>{fmt_h(summary['private'])} private</span>"
         if under:
-            figures += f'<span class="under">{fmt_h(under)} under a block, unbooked</span>'
+            figures += f'<span class="under">{fmt_small(under)} under a block, unbooked</span>'
         if day in blocks:
             filled += booked[day]
             booking = " · ".join(f"{clock(start)}–{clock(end)}" for start, end in blocks[day]) or "nothing to book"
