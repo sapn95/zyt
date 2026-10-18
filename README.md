@@ -206,6 +206,12 @@ hours and anything a workday could not hold are dealt out to the workdays with
 the fewest hours first; a day keeps its real start where it fits. What finds
 no room is printed as the leftover rather than dropped
 ([ADR 0006](docs/adr/0006-the-proposal-moves-minutes-it-never-makes-them.md)).
+
+A day holds what the window holds: `08:00` to `20:00` with five-hour blocks
+and an hour between them is ten hours, so a fifty-hour week leaves eight
+minutes over. Set `"latest": null` for a day with no closing time, and the
+week is booked whole. The board then draws the hours the days actually used
+rather than every hour to midnight.
 `zyt day` is one day of the same; `--json` on either gives it to a script.
 
 **No private minute is in the booking.** A minute recorded as private is not a
