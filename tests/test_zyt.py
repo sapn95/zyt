@@ -281,6 +281,36 @@ class NoClosingTime(unittest.TestCase):
         summary = {"privateAt": [{"from": 23 * 60, "to": 24 * 60, "first": 82800, "last": 86400}]}
         self.assertEqual(zyt.kept_out(summary, self.REPORT), [[23 * 60, 24 * 60]])
 
+    def test_a_late_start_still_ends_at_midnight(self):
+        # Nothing clamps the start any more, and the day is still a day: five
+        # hours from 23:50 are moved back to end at midnight.
+        blocks = zyt.layout(23 * 60 + 50, 300, self.REPORT)
+        self.assertEqual(blocks, [[19 * 60, 24 * 60]])
+        self.assertLessEqual(blocks[-1][1], 24 * 60)
+
+    def test_a_full_day_is_placed_whole_and_never_past_midnight(self):
+        room = zyt.capacity(self.REPORT)
+        blocks = zyt.layout(8 * 60, room, self.REPORT)
+        self.assertEqual(zyt.placed(blocks), room)
+        self.assertLessEqual(blocks[-1][1], 24 * 60)
+        self.assertEqual(zyt.clock(blocks[-1][1]), "24:00")
+
+    def test_an_empty_week_draws_an_hour_rather_than_a_whole_clock(self):
+        self.assertEqual(zyt.scale({}, {}, self.REPORT), (8, 9))
+
+    def test_only_null_means_no_closing_time(self):
+        # A typo used to read as "no closing time" and book the evening away.
+        for bad in ("", 0, False, "25:00", "08:00", "7:60"):
+            with self.assertRaises(SystemExit):
+                zyt.check_window("rules.json", {**self.REPORT, "latest": bad})
+        zyt.check_window("rules.json", {**self.REPORT, "latest": None})
+        zyt.check_window("rules.json", {**self.REPORT, "latest": "20:00"})
+
+    def test_a_window_that_closes_before_it_opens_is_refused(self):
+        # It booked nothing all week and said nothing about why.
+        with self.assertRaises(SystemExit):
+            zyt.check_window("rules.json", {**self.REPORT, "latest": "00:00"})
+
     def test_the_board_scale_follows_the_day_rather_than_the_clock(self):
         segments = {dt.date(2026, 9, 14): [seg("2026-09-14", "09:00", "17:00")]}
         blocks = {dt.date(2026, 9, 14): [[9 * 60, 17 * 60]]}
