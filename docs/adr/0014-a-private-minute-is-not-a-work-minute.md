@@ -98,6 +98,16 @@ The board's recorded lane is left as it is: it draws what the sources wrote,
 overlap and all, which is how the private sliver inside a meeting can be seen
 at all. The figures beside it say what counts.
 
+**And the slivers that stay under a block are counted out loud.** "None of it
+is booked" is a claim about an arithmetic nobody can see, and the first
+question it got was whether it was true. So `private_under` adds up the
+private time each day's blocks were drawn across; the report prints it under
+the totals, the board paints those minutes purple on the booking lane and
+names the amount beside the day, and `--json` carries it as
+`privateUnderBooking`. Measured on this machine: 0h58 in 2026-W41, 1h00 in
+W40 and 2h19 in W39, against weeks of about fifty hours. A figure that can be
+checked is worth more than one that has to be believed.
+
 ## What was rejected
 
 Letting the meeting win. A calendar entry is a plan, the keyboard is a
