@@ -300,11 +300,31 @@ class NoClosingTime(unittest.TestCase):
 
     def test_only_null_means_no_closing_time(self):
         # A typo used to read as "no closing time" and book the evening away.
-        for bad in ("", 0, False, "25:00", "08:00", "7:60"):
+        for bad in ("", 0, False, [], {"at": "20:00"}):
             with self.assertRaises(SystemExit):
                 zyt.check_window("rules.json", {**self.REPORT, "latest": bad})
         zyt.check_window("rules.json", {**self.REPORT, "latest": None})
         zyt.check_window("rules.json", {**self.REPORT, "latest": "20:00"})
+
+    def test_a_clock_has_to_look_like_one(self):
+        # `minutes` takes what it is given: "7:60" comes back as 8 o'clock and
+        # "08:00:00" as a crash. Neither reaches the rest of the code.
+        self.assertEqual(zyt.minutes("7:60"), 8 * 60)
+        for bad in ("7:60", "08:75", "25:00", "08:00:00", "8:00", "0800", "eight"):
+            with self.assertRaises(SystemExit):
+                zyt.a_clock("rules.json", "report.latest", bad)
+        self.assertEqual(zyt.a_clock("rules.json", "report.latest", "24:00"), 24 * 60)
+        self.assertEqual(zyt.a_clock("rules.json", "report.earliest", "08:05"), 8 * 60 + 5)
+
+    def test_the_other_times_of_day_are_checked_too(self):
+        with self.assertRaises(SystemExit):
+            zyt.check_window("rules.json", {**self.REPORT, "defaultStart": "8:00"})
+        with self.assertRaises(SystemExit):
+            zyt.check_window("rules.json", {**self.REPORT, "lunch": {"earliest": "11:15", "latest": "11:00"}})
+        with self.assertRaises(SystemExit):
+            zyt.check_window("rules.json", {**self.REPORT, "lunch": "midday"})
+        # a day with no lunch break is a day with no lunch break
+        zyt.check_window("rules.json", {**self.REPORT, "lunch": None})
 
     def test_a_window_that_closes_before_it_opens_is_refused(self):
         # It booked nothing all week and said nothing about why.
