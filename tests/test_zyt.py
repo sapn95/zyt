@@ -1142,19 +1142,34 @@ class Board(unittest.TestCase):
             try:
                 zyt.sys.stdout = io.StringIO()
                 zyt.hs_call = lambda lua, **_: asked.append(lua)
-                self.assertEqual(zyt.main(["board", "2026-W38", "--no-open"]), 0)
+                self.assertEqual(zyt.main(["board", "--no-open"]), 0)
                 live = (zyt.STATE / "board.html").read_text()
                 self.assertIn('<meta http-equiv="refresh" content="300">', live)
                 # the page is only half of it: the Spoon is asked to keep
                 # rewriting the file the page re-reads
-                self.assertEqual(asked, ["if _G.zyt then _G.zyt:keepBoardFresh() end"])
+                self.assertEqual(asked, ['if _G.zyt then _G.zyt:keepBoardFresh("") end'])
 
-                # a copy for somebody else gets neither half
+                # and it is asked for the period this run drew, or a board of
+                # September would be replaced by this week a few minutes later
                 asked.clear()
-                page = Path(tmp) / "copy.html"
+                self.assertEqual(zyt.main(["board", "2026-W38", "--no-open"]), 0)
+                self.assertEqual(asked, ['if _G.zyt then _G.zyt:keepBoardFresh("2026-W38") end'])
+                asked.clear()
+                self.assertEqual(zyt.main(["board", "2026-09-14", "--no-open"]), 0)
+                self.assertEqual(asked, ['if _G.zyt then _G.zyt:keepBoardFresh("2026-09-14") end'])
+
+                # a snapshot over the live file gets neither half, and takes the
+                # timer down with it rather than being replaced by this week
+                asked.clear()
                 self.assertEqual(zyt.main(["board", "2026-W38", "--one-week", "--no-open"]), 0)
                 self.assertNotIn("http-equiv", (zyt.STATE / "board.html").read_text())
-                self.assertEqual(asked, [])
+                self.assertEqual(asked, ["if _G.zyt then _G.zyt:stopBoardRefresh() end"])
+
+                # a copy somewhere else is nobody's business: no refresh, and
+                # nothing said to the Spoon, whose board is the one in the state
+                # directory and has not moved
+                asked.clear()
+                page = Path(tmp) / "copy.html"
                 self.assertEqual(zyt.main(["board", "2026-W38", "--out", str(page), "--no-open"]), 0)
                 self.assertNotIn("http-equiv", page.read_text())
                 self.assertEqual(asked, [])
@@ -1164,7 +1179,7 @@ class Board(unittest.TestCase):
                 asked.clear()
                 zyt.os.environ["ZYT_FROM_SPOON"] = "1"
                 try:
-                    self.assertEqual(zyt.main(["board", "2026-W38", "--no-open"]), 0)
+                    self.assertEqual(zyt.main(["board", "--no-open"]), 0)
                 finally:
                     del zyt.os.environ["ZYT_FROM_SPOON"]
                 self.assertIn('<meta http-equiv="refresh" content="300">', (zyt.STATE / "board.html").read_text())
@@ -1182,6 +1197,11 @@ class Board(unittest.TestCase):
             self.assertEqual(sorted(child.name for child in page.parent.iterdir()), ["board.html"])
             zyt.write_whole(page, "second\n")
             self.assertEqual(page.read_text(), "second\n")
+            # a rename brings its own mode, and a board somebody has shut is
+            # not a file to widen again behind their back
+            page.chmod(0o600)
+            zyt.write_whole(page, "third\n")
+            self.assertEqual(page.stat().st_mode & 0o777, 0o600)
 
     def test_the_board_command_writes_the_file_it_is_given(self):
         with tempfile.TemporaryDirectory() as tmp:
