@@ -302,13 +302,13 @@ lists every key), then:
 Or through Homebrew, which puts `zyt` on the PATH:
 
 ```sh
-brew install sapn95/tap/zyt
+brew install --HEAD sapn95/tap/zyt
 zyt link                              # then add the init.lua line it prints
 ```
 
-The formula lives in [sapn95/homebrew-tap](https://github.com/sapn95/homebrew-tap)
-and installs the newest release. `brew install --HEAD sapn95/tap/zyt` takes
-`main` instead.
+The formula is in [sapn95/homebrew-tap](https://github.com/sapn95/homebrew-tap),
+beside the other tools. There is no tagged release to install: it builds `main`,
+and `brew upgrade --fetch-HEAD zyt` takes the newest commit.
 
 Window titles need Hammerspoon to have Accessibility permission; the doctor
 says whether it does.
