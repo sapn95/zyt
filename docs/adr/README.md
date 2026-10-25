@@ -20,3 +20,4 @@ their idea was considered or simply missed.
 | [0012](0012-the-pane-in-front-is-the-chat.md) | The pane in front is the chat, and the terminal says which |
 | [0013](0013-the-calendar-comes-over-graph.md) | The calendar comes over Graph, not out of Outlook |
 | [0014](0014-a-private-minute-is-not-a-work-minute.md) | A private minute is not a work minute |
+| [0015](0015-the-open-board-redraws-itself.md) | The open board redraws itself every five minutes |
