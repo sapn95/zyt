@@ -1391,12 +1391,8 @@ def cmd_board(args) -> int:
         # command: it is waiting for this process to finish, so an ipc call back
         # into it would sit there until the timeout and answer nothing.
         if live:
-            # The period is quoted into Lua, so one that does not look like a
-            # period is not sent at all: `fromisoformat` takes `20260914` as
-            # well, and redrawing the wrong week beats not redrawing at all only
-            # in the sense that something happened.
-            asked = args.when or ""
-            if not asked or re.fullmatch(r"\d{4}-(?:[Ww]\d{2}|\d{2}-\d{2})", asked):
+            asked = asked_period(args.when)
+            if asked is not None:
                 hs_call(f'if _G.zyt then _G.zyt:keepBoardFresh("{asked}") end')
         else:
             hs_call("if _G.zyt then _G.zyt:stopBoardRefresh() end")
@@ -1422,6 +1418,20 @@ def git_remote(cwd: str):
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout.strip() or None
+
+
+def asked_period(when) -> str | None:
+    """The period to have the Spoon keep redrawing, empty for this week, and
+    None for anything that does not look like a period.
+
+    `date.fromisoformat` takes `20260914` as well as `2026-09-14` on a Python
+    newer than the one a Mac ships with, and this string is quoted into Lua, so
+    what the Spoon is told about are the two shapes the command line documents.
+    An unrecognised one is not sent at all: the board then goes stale, where
+    redrawing this week would sit there looking like the day asked for."""
+    if not when:
+        return ""
+    return when if re.fullmatch(r"\d{4}-(?:[Ww]\d{2}|\d{2}-\d{2})", when) else None
 
 
 def write_whole(path: Path, text: str) -> None:
