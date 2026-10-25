@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-# The formula lives in the repository it builds, the same way sapn95/vpnbar does
-# it: `brew tap sapn95/zyt <url>` taps this repository directly, so there is one
-# place to change and no second repository to keep in step.
+# The formula a release carries with it. Nobody installs from this file:
+# `brew install sapn95/tap/zyt` reads the copy in sapn95/homebrew-tap, and that
+# tap builds its copy by taking this body out of the newest release's own
+# tarball and rewriting the url and the checksum from the file it actually
+# downloaded. So this is the place to change what gets installed, and the two
+# release lines here are allowed to trail the newest tag by one.
 class Zyt < Formula
   desc "Work or private: a Hammerspoon time tracker that knows the difference"
   homepage "https://github.com/sapn95/zyt"
-  # While the repository is private this is the SSH form, and note the `ssh://`:
-  # Homebrew parses it with URI and rejects `git@github.com:...` outright, even
-  # though `brew tap` accepts either spelling. Switch to
-  # https://github.com/sapn95/zyt.git when the repository goes public.
-  head "ssh://git@github.com/sapn95/zyt.git", branch: "main"
+  license "MIT"
+  head "https://github.com/sapn95/zyt.git", branch: "main"
 
   depends_on :macos
 

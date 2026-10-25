@@ -35,7 +35,7 @@ describe("classify.decide", function()
   end)
 
   it("reads titles without caring about case", function()
-    assert.same({ "work", "title" }, { decide({ app = "firefox", title = "SIG-1 · JIRA" }) })
+    assert.same({ "work", "title" }, { decide({ app = "firefox", title = "ABC-1 · JIRA" }) })
     assert.same({ "private", "title" }, { decide({ app = "firefox", title = "Pull requests · GitHub" }) })
   end)
 

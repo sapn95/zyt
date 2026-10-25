@@ -59,7 +59,8 @@ jobs:
       - name: shellcheck
         run: shellcheck scripts/*.sh
       - name: addresses
-        # Every IPv4 in the tree has to be a documentation or private one.
+        # Every IPv4 in the tree has to be a documentation one. Private space is
+        # where real internal addresses live, so it is not allowed either.
         run: ./scripts/leak-lint.sh
 
   test:
@@ -94,6 +95,22 @@ jobs:
           python-version: "3.9"
       - name: python
         run: python3 -m unittest discover -s tests -v
+
+  shell-tests:
+    name: shell tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: install bats
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bats
+      - name: bats
+        # The address lint is a shell script and is tested as one, on the cheap
+        # runner: it reads a repository of its own that the test builds, so
+        # nothing here depends on macOS or on this checkout.
+        run: bats spec/*.bats
 
   workflows:
     name: lint workflows
