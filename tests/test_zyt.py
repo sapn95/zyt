@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -76,7 +77,7 @@ class SplitAndSummarise(unittest.TestCase):
     def test_an_empty_day(self):
         self.assertEqual(
             zyt.summarise([]),
-            {"start": None, "end": None, "work": 0, "private": 0, "privateAt": [], "break": 0},
+            {"start": None, "end": None, "work": 0, "meeting": 0, "private": 0, "privateAt": [], "break": 0},
         )
 
 
@@ -121,6 +122,23 @@ class PrivateIsNotWork(unittest.TestCase):
             summary["privateAt"],
             [{"from": 9 * 60 + 40, "to": 10 * 60 + 10, "first": 34800, "last": 36600}],
         )
+
+    def test_the_calendar_figure_is_part_of_the_work_one(self):
+        # Two hours in the diary, half an hour of it spent privately, and one
+        # hour at the keyboard after it. The calendar figure loses the same half
+        # hour the work figure does, or it would be a figure inside the work
+        # total that is bigger than the part of the total it is in.
+        day = [
+            zyt.Segment(at("2026-09-14", "09:00"), at("2026-09-14", "11:00"), "work", zyt.MEETING),
+            seg("2026-09-14", "09:40", "10:10", "private"),
+            seg("2026-09-14", "11:00", "12:00"),
+        ]
+        summary = zyt.summarise(day)
+        self.assertEqual(summary["work"], 150 * 60)
+        self.assertEqual(summary["meeting"], 90 * 60)
+        self.assertLess(summary["meeting"], summary["work"])
+        # and a day nobody had a meeting in says nothing came from the calendar
+        self.assertEqual(zyt.summarise([seg("2026-09-14", "09:00", "10:00")])["meeting"], 0)
 
     def test_the_day_starts_and_ends_at_work(self):
         day = [
@@ -496,7 +514,15 @@ def week(**hours):
         day = monday + dt.timedelta(days=i)
         mins = hours.get(name, 0)
         start = at(day.isoformat(), "09:00") if mins else None
-        days[day] = {"start": start, "end": None, "work": mins * 60, "private": 0, "privateAt": [], "break": 0}
+        days[day] = {
+            "start": start,
+            "end": None,
+            "work": mins * 60,
+            "meeting": 0,
+            "private": 0,
+            "privateAt": [],
+            "break": 0,
+        }
     return days
 
 
@@ -1113,6 +1139,24 @@ class Board(unittest.TestCase):
         moment = at("2026-09-14", "00:27")
         flicker = zyt.Segment(moment, moment + dt.timedelta(seconds=20), "private")
         self.assertEqual(zyt.said(flicker), "private 00:27:00, 20s")
+
+    def test_the_week_says_what_it_recorded_before_how_it_splits(self):
+        days = week(mon=480, sat=60)
+        days[dt.date(2026, 9, 14)]["private"] = 45 * 60
+        days[dt.date(2026, 9, 14)]["meeting"] = 120 * 60
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        page = zyt.board_week(days, {}, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w")
+        tiles = re.findall(r"<li><b>([^<]*)</b>([^<]*)</li>", page)
+        self.assertEqual(
+            tiles,
+            [
+                ("9h45", "recorded total"),  # 9h00 of work and 0h45 private
+                ("2h00", "recorded by calendar"),
+                ("9h00 / 9h00", "recorded work / booked"),
+                ("0h45", "recorded private"),
+                ("0h00", "left over"),
+            ],
+        )
 
     def test_the_live_board_reloads_itself_and_a_copy_does_not(self):
         drawn = zyt.board_week(

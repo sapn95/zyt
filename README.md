@@ -256,6 +256,15 @@ not the same thing to look at; and the blocks the proposal would have you book. 
 times. The scale covers the hours that may be booked and widens for anything
 outside them, so a Sunday evening shows up where it happened.
 
+Above the week stand five figures: **recorded total**, everything the week holds,
+work and private together; **recorded by calendar**, how much of the work came
+out of the diary rather than off the keyboard; **recorded work / booked**, the
+pair worth reading together, because equal means the proposal carries the week;
+**recorded private**, which is never booked; and **left over**, the minutes the
+rules had nowhere to put. The calendar figure is a part of the work one and not
+added to it, and work and private do not overlap, because a private minute is
+not a work minute ([ADR 0014](docs/adr/0014-a-private-minute-is-not-a-work-minute.md)).
+
 ```text
             07   08   09   10   11   12   13   14   15   16   17   18
 Mon 14.09.       ████████████████████▓▓▓▓ ███████████████████     7h50 · 0h45 private

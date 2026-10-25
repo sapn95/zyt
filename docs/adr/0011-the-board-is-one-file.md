@@ -24,6 +24,14 @@ calendar said about a room somebody was in, and a day where the two disagree
 is worth seeing rather than adding up. They are both work and the totals say
 so, which is the other reason to separate them: the figure on the right has to
 keep meaning all of it.
+
+The figures above the week say it in the same order a person asks it, decided
+25.10.2026: what was recorded at all, how much of it came out of the calendar,
+the work against what would be booked, the private time, and what the rules
+could not place. The calendar figure is inside the work one, with the same
+private minutes taken out of both, so it can be held against the work total
+without being added to it; a figure of a part that can exceed the whole it is in
+is a figure nobody can read.
 Holding one against the other is then looking, not counting. The scale is the
 window that may be booked, widened to whole hours around anything recorded or
 proposed outside it, so a Sunday evening is drawn where it happened instead of
