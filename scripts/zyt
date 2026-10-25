@@ -1382,12 +1382,20 @@ def cmd_board(args) -> int:
     out = Path(args.out).expanduser() if args.out else STATE / "board.html"
     write_whole(out, page)
     print(out)
-    if live and not os.environ.get("ZYT_FROM_SPOON"):
-        # The page re-reads the file; the Spoon is what gives it something new
-        # to read. Skipped when the Spoon is the one running this command: it is
-        # waiting for this process to finish, so an ipc call back into it would
-        # sit there until the timeout and answer nothing.
-        hs_call("if _G.zyt then _G.zyt:keepBoardFresh() end")
+    if not args.out and not os.environ.get("ZYT_FROM_SPOON"):
+        # The page re-reads the file; the Spoon is what gives it something new to
+        # read, and it has to redraw the period this run drew, or a board of
+        # September would turn into this week five minutes later. A snapshot
+        # written over the live file takes the timer down with it for the same
+        # reason. Both are skipped when the Spoon is the one running this
+        # command: it is waiting for this process to finish, so an ipc call back
+        # into it would sit there until the timeout and answer nothing.
+        if live:
+            # Quoted into Lua, so only a period that parsed as one goes through.
+            asked = args.when if args.when and re.fullmatch(r"\d{4}-(?:[Ww]\d{2}|\d{2}-\d{2})", args.when) else ""
+            hs_call(f'if _G.zyt then _G.zyt:keepBoardFresh("{asked}") end')
+        else:
+            hs_call("if _G.zyt then _G.zyt:stopBoardRefresh() end")
     if not args.no_open:
         # `open` reports a browser it could not start as an exit status and not
         # as an exception, so the status is read too. Either way the board is
@@ -1415,10 +1423,18 @@ def git_remote(cwd: str):
 def write_whole(path: Path, text: str) -> None:
     """Written whole, then renamed, for the reason write_note gives below: the
     board reloads itself every few minutes now, and a browser that reads the
-    file halfway through a write draws half a week and no footer."""
+    file halfway through a write draws half a week and no footer.
+
+    A rename brings the temporary's own mode with it, where writing into the
+    file kept the mode that was already there. Somebody who has taken a board of
+    theirs down to 0600 meant it, and a drawing of their week is not the file to
+    quietly widen back to whatever the umask says."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.parent / f"{path.name}.{os.getpid()}.tmp"
     temporary.write_text(text)
+    # Nothing there to inherit from leaves the umask's answer standing.
+    with contextlib.suppress(OSError):
+        temporary.chmod(path.stat().st_mode & 0o7777)
     temporary.replace(path)
 
 

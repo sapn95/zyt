@@ -50,11 +50,18 @@ obj.configPath = xdg("XDG_CONFIG_HOME", "/.config") .. "/zyt/rules.json"
 --- Where the rows, the open segment and the tools' context notes live.
 obj.statePath = xdg("XDG_STATE_HOME", "/.local/state") .. "/zyt"
 
--- How often an open board is redrawn. `BOARD_REFRESH_SECONDS` in scripts/zyt is
--- the page's own meta refresh and has to stay the same number: a reload with no
--- rewrite behind it shows nothing new, and a rewrite nobody reloads is
--- invisible (ADR 0015).
+-- How often the page asks the browser to read it again. `BOARD_REFRESH_SECONDS`
+-- in scripts/zyt writes that number into the page and has to stay the same one:
+-- a reload with no rewrite behind it shows nothing new, and a rewrite nobody
+-- reloads is invisible (ADR 0015).
 local BOARD_REFRESH_SECONDS = 300
+
+-- The file is rewritten twice as often as it is asked for. The two clocks have
+-- no phase relation: a reload landing a moment before a rewrite would show the
+-- drawing from before it and then nothing new for a whole interval after it. At
+-- half the interval a reload never finds a file older than half of one,
+-- whichever order the two come in.
+local BOARD_REWRITE_SECONDS = BOARD_REFRESH_SECONDS / 2
 
 --- Zyt.cli
 --- Variable
@@ -1086,7 +1093,7 @@ end
 --- page that is already on screen. Anything more than that line means the
 --- browser would not take it, and then the path is the useful part.
 function obj:showBoard()
-  local out, ok = hs.execute(self:boardCommand(), true)
+  local out, ok = hs.execute(self:boardCommand(nil), true)
   out = (out or ""):gsub("%s+$", "")
   if not ok then
     self:complain("the board failed: " .. out)
@@ -1101,31 +1108,46 @@ end
 --- The command, and `ZYT_FROM_SPOON` with it. It tells the command line not to
 --- ask Hammerspoon for anything: this process is inside Hammerspoon and waiting
 --- for that one to finish, so the question would sit in the queue behind it.
-function obj:boardCommand(extra)
-  return ("ZYT_FROM_SPOON=1 %q board%s 2>&1"):format(self.cli, extra or "")
+--- `when` is the week or the day the board is of, empty for this week.
+function obj:boardCommand(when, extra)
+  local period = (when and when ~= "") and (" " .. ("%q"):format(when)) or ""
+  return ("ZYT_FROM_SPOON=1 %q board%s%s 2>&1"):format(self.cli, period, extra or "")
 end
 
 --- The open board asks the browser to read it again every few minutes, which
 --- only shows something new if the file has changed by then. This is the half
 --- that changes it: the same command with the browser left alone, from the
---- first board of the session until Hammerspoon stops (ADR 0015). Calling it
---- again while it is running does nothing, so the menu and the command line can
---- both ask. A run that fails stops it rather than complaining every few
---- minutes at somebody who is not looking.
-function obj:keepBoardFresh()
-  if self.boardTimer then
+--- first board of the session until Hammerspoon stops (ADR 0015). Asking again
+--- for the period that is already being redrawn does nothing, so the menu and
+--- the command line can both ask; asking for another one moves the timer to it,
+--- because there is one live board and this is which week it is of. A run that
+--- fails stops the timer rather than complaining every few minutes at somebody
+--- who is not looking.
+function obj:keepBoardFresh(when)
+  when = when or ""
+  if self.boardTimer and self.boardWhen == when then
     return
   end
-  self.boardTimer = hs.timer.doEvery(BOARD_REFRESH_SECONDS, function()
-    local out, ok = hs.execute(self:boardCommand(" --no-open"), true)
+  self:stopBoardRefresh()
+  self.boardWhen = when
+  self.boardTimer = hs.timer.doEvery(BOARD_REWRITE_SECONDS, function()
+    local out, ok = hs.execute(self:boardCommand(self.boardWhen, " --no-open"), true)
     if not ok then
-      if self.boardTimer then
-        self.boardTimer:stop()
-        self.boardTimer = nil
-      end
+      self:stopBoardRefresh()
       self:complain("the board stopped redrawing: " .. tostring(out))
     end
   end)
+end
+
+--- Stop redrawing. The command line asks for this when it writes a snapshot
+--- over the live file: that file is a week as it was, and a timer still running
+--- would replace it with the current one a few minutes later.
+function obj:stopBoardRefresh()
+  if self.boardTimer then
+    self.boardTimer:stop()
+    self.boardTimer = nil
+  end
+  self.boardWhen = nil
 end
 
 function obj:openRules()

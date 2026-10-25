@@ -282,9 +282,9 @@ board opened in one you have marked as work records work time.
 click away without a terminal.
 
 A board left open keeps up with the day. The page asks the browser to read it
-again every five minutes, and Hammerspoon rewrites it on the same interval from
+again every five minutes, and Hammerspoon redraws the file twice as often from
 the first board of the session onwards, so a tab on the second monitor is never
-more than five minutes behind
+more than five minutes behind, whatever the phase between the two clocks
 ([ADR 0015](docs/adr/0015-the-open-board-redraws-itself.md)). It stays a page
 with no script in it: the reload is one `<meta>` and it re-reads a file. Only the
 live board does this. `--one-week` and `--out` write a week as it was, for
