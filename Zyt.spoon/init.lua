@@ -50,6 +50,12 @@ obj.configPath = xdg("XDG_CONFIG_HOME", "/.config") .. "/zyt/rules.json"
 --- Where the rows, the open segment and the tools' context notes live.
 obj.statePath = xdg("XDG_STATE_HOME", "/.local/state") .. "/zyt"
 
+-- How often an open board is redrawn. `BOARD_REFRESH_SECONDS` in scripts/zyt is
+-- the page's own meta refresh and has to stay the same number: a reload with no
+-- rewrite behind it shows nothing new, and a rewrite nobody reloads is
+-- invisible (ADR 0015).
+local BOARD_REFRESH_SECONDS = 300
+
 --- Zyt.cli
 --- Variable
 --- The command the menu runs for the report: the checkout's own script when
@@ -1080,13 +1086,46 @@ end
 --- page that is already on screen. Anything more than that line means the
 --- browser would not take it, and then the path is the useful part.
 function obj:showBoard()
-  local out, ok = hs.execute(("%q board 2>&1"):format(self.cli), true)
+  local out, ok = hs.execute(self:boardCommand(), true)
   out = (out or ""):gsub("%s+$", "")
   if not ok then
     self:complain("the board failed: " .. out)
-  elseif out:find("\n") then
+    return
+  end
+  if out:find("\n") then
     hs.alert.show("zyt: " .. out, 4)
   end
+  self:keepBoardFresh()
+end
+
+--- The command, and `ZYT_FROM_SPOON` with it. It tells the command line not to
+--- ask Hammerspoon for anything: this process is inside Hammerspoon and waiting
+--- for that one to finish, so the question would sit in the queue behind it.
+function obj:boardCommand(extra)
+  return ("ZYT_FROM_SPOON=1 %q board%s 2>&1"):format(self.cli, extra or "")
+end
+
+--- The open board asks the browser to read it again every few minutes, which
+--- only shows something new if the file has changed by then. This is the half
+--- that changes it: the same command with the browser left alone, from the
+--- first board of the session until Hammerspoon stops (ADR 0015). Calling it
+--- again while it is running does nothing, so the menu and the command line can
+--- both ask. A run that fails stops it rather than complaining every few
+--- minutes at somebody who is not looking.
+function obj:keepBoardFresh()
+  if self.boardTimer then
+    return
+  end
+  self.boardTimer = hs.timer.doEvery(BOARD_REFRESH_SECONDS, function()
+    local out, ok = hs.execute(self:boardCommand(" --no-open"), true)
+    if not ok then
+      if self.boardTimer then
+        self.boardTimer:stop()
+        self.boardTimer = nil
+      end
+      self:complain("the board stopped redrawing: " .. tostring(out))
+    end
+  end)
 end
 
 function obj:openRules()
@@ -1317,7 +1356,7 @@ function obj:stop()
   end
   self:closeNow()
   self:dismiss()
-  for _, key in ipairs({ "timer", "syncTimer", "syncSoon" }) do
+  for _, key in ipairs({ "timer", "syncTimer", "syncSoon", "boardTimer" }) do
     if self[key] then
       self[key]:stop()
       self[key] = nil

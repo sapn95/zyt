@@ -819,6 +819,14 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
 
 # One file, no script, nothing fetched: a board is a drawing of the week, and a
 # drawing of somebody's week does not need a network (ADR 0011).
+
+# How often the live board asks the browser to read it again. The Spoon rewrites
+# the file on the same interval, and `BOARD_REFRESH_SECONDS` in
+# Zyt.spoon/init.lua is the other half of this number: a reload that finds the
+# same file shows nothing new, and a rewrite nobody reloads is invisible, so the
+# two have to agree (ADR 0015).
+BOARD_REFRESH_SECONDS = 300
+
 BOARD_STYLE = """
 :root {
   color-scheme: light dark;
@@ -1116,10 +1124,15 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
     )
 
 
-def render_board(weeks: list, title: str) -> str:
+def render_board(weeks: list, title: str, refresh: int = 0) -> str:
     """The weeks as one file, the one asked for on show and the rest a link away.
     They are all written out because a page that could fetch the next week would
-    need something to fetch it from, and this is a file (ADR 0011)."""
+    need something to fetch it from, and this is a file (ADR 0011).
+
+    `refresh` is seconds, and 0 leaves the page alone. It is a meta refresh
+    rather than a script, so the page still runs nothing, and the browser
+    re-reads the file it already has rather than asking the network for one
+    (ADR 0015)."""
     keys = [
         ("work", "at the keyboard"),
         (MEETING, "in a meeting"),
@@ -1128,6 +1141,8 @@ def render_board(weeks: list, title: str) -> str:
     ]
     source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)
     made = f"written {dt.datetime.now():%d.%m.%Y %H:%M} from {source} · one file, no script, nothing fetched"
+    if refresh:
+        made += f" · re-read every {refresh // 60} min"
     return "\n".join(
         [
             "<!doctype html>",
@@ -1135,6 +1150,7 @@ def render_board(weeks: list, title: str) -> str:
             "<head>",
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1">',
+            *([f'<meta http-equiv="refresh" content="{refresh}">'] if refresh else []),
             f"<title>zyt · {html.escape(title)}</title>",
             f"<style>{BOARD_STYLE}</style>",
             "</head>",
@@ -1358,11 +1374,20 @@ def cmd_board(args) -> int:
             # A file with one week in it has nowhere to go, so it gets no arrows.
             nav = board_nav(older, newer) if len(mondays) > 1 else ""
             weeks.append(drawn_week(grouped.get(each, []), each, rules["report"], nav, each == monday))
-    page = render_board(weeks, title)
+    # The live board is the one in the state directory, and it is the only one
+    # that refreshes: `--one-week` and `--out` write a copy for somebody else, a
+    # drawing of a week as it was, which has nothing to reload for.
+    live = not args.one_week and not args.out
+    page = render_board(weeks, title, refresh=BOARD_REFRESH_SECONDS if live else 0)
     out = Path(args.out).expanduser() if args.out else STATE / "board.html"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(page)
+    write_whole(out, page)
     print(out)
+    if live and not os.environ.get("ZYT_FROM_SPOON"):
+        # The page re-reads the file; the Spoon is what gives it something new
+        # to read. Skipped when the Spoon is the one running this command: it is
+        # waiting for this process to finish, so an ipc call back into it would
+        # sit there until the timeout and answer nothing.
+        hs_call("if _G.zyt then _G.zyt:keepBoardFresh() end")
     if not args.no_open:
         # `open` reports a browser it could not start as an exit status and not
         # as an exception, so the status is read too. Either way the board is
@@ -1385,6 +1410,16 @@ def git_remote(cwd: str):
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout.strip() or None
+
+
+def write_whole(path: Path, text: str) -> None:
+    """Written whole, then renamed, for the reason write_note gives below: the
+    board reloads itself every few minutes now, and a browser that reads the
+    file halfway through a write draws half a week and no footer."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / f"{path.name}.{os.getpid()}.tmp"
+    temporary.write_text(text)
+    temporary.replace(path)
 
 
 def write_note(path: Path, note: dict) -> dict:

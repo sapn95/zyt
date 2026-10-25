@@ -1114,6 +1114,75 @@ class Board(unittest.TestCase):
         flicker = zyt.Segment(moment, moment + dt.timedelta(seconds=20), "private")
         self.assertEqual(zyt.said(flicker), "private 00:27:00, 20s")
 
+    def test_the_live_board_reloads_itself_and_a_copy_does_not(self):
+        drawn = zyt.board_week(
+            week(mon=480), {dt.date(2026, 9, 14): []}, {}, {}, None, REPORT, "Week 2026-W38", "14.09.", "w"
+        )
+        live = zyt.render_board([drawn], "Week 2026-W38", refresh=zyt.BOARD_REFRESH_SECONDS)
+        self.assertIn('<meta http-equiv="refresh" content="300">', live)
+        self.assertIn("re-read every 5 min", live)
+        # a meta refresh and not a script: the page still runs nothing
+        self.assertNotIn("<script", live)
+        copy = zyt.render_board([drawn], "Week 2026-W38")
+        self.assertNotIn("http-equiv", copy)
+        self.assertNotIn("re-read every", copy)
+
+    def test_only_the_board_in_the_state_directory_refreshes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state, config, out = zyt.STATE, zyt.CONFIG, zyt.sys.stdout
+            called = zyt.hs_call
+            asked = []
+            zyt.STATE = Path(tmp) / "state"
+            zyt.CONFIG = Path(tmp) / "rules.json"
+            zyt.STATE.mkdir()
+            (zyt.STATE / "intervals.csv").write_text(
+                "start,end,seconds,class,source,app\n"
+                "2026-09-14T08:00:00+02:00,2026-09-14T12:00:00+02:00,14400,work,app,Mail\n"
+            )
+            try:
+                zyt.sys.stdout = io.StringIO()
+                zyt.hs_call = lambda lua, **_: asked.append(lua)
+                self.assertEqual(zyt.main(["board", "2026-W38", "--no-open"]), 0)
+                live = (zyt.STATE / "board.html").read_text()
+                self.assertIn('<meta http-equiv="refresh" content="300">', live)
+                # the page is only half of it: the Spoon is asked to keep
+                # rewriting the file the page re-reads
+                self.assertEqual(asked, ["if _G.zyt then _G.zyt:keepBoardFresh() end"])
+
+                # a copy for somebody else gets neither half
+                asked.clear()
+                page = Path(tmp) / "copy.html"
+                self.assertEqual(zyt.main(["board", "2026-W38", "--one-week", "--no-open"]), 0)
+                self.assertNotIn("http-equiv", (zyt.STATE / "board.html").read_text())
+                self.assertEqual(asked, [])
+                self.assertEqual(zyt.main(["board", "2026-W38", "--out", str(page), "--no-open"]), 0)
+                self.assertNotIn("http-equiv", page.read_text())
+                self.assertEqual(asked, [])
+
+                # and the Spoon running the command is not asked anything: it is
+                # waiting for this process, so the question would wait for it
+                asked.clear()
+                zyt.os.environ["ZYT_FROM_SPOON"] = "1"
+                try:
+                    self.assertEqual(zyt.main(["board", "2026-W38", "--no-open"]), 0)
+                finally:
+                    del zyt.os.environ["ZYT_FROM_SPOON"]
+                self.assertIn('<meta http-equiv="refresh" content="300">', (zyt.STATE / "board.html").read_text())
+                self.assertEqual(asked, [])
+            finally:
+                zyt.sys.stdout, zyt.hs_call = out, called
+                zyt.STATE, zyt.CONFIG = state, config
+
+    def test_the_board_is_renamed_into_place_rather_than_written_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            page = Path(tmp) / "not" / "there" / "board.html"
+            zyt.write_whole(page, "<!doctype html>\n")
+            self.assertEqual(page.read_text(), "<!doctype html>\n")
+            # nothing left behind to be served by mistake
+            self.assertEqual(sorted(child.name for child in page.parent.iterdir()), ["board.html"])
+            zyt.write_whole(page, "second\n")
+            self.assertEqual(page.read_text(), "second\n")
+
     def test_the_board_command_writes_the_file_it_is_given(self):
         with tempfile.TemporaryDirectory() as tmp:
             state, config, out = zyt.STATE, zyt.CONFIG, zyt.sys.stdout

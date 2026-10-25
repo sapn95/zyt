@@ -281,6 +281,16 @@ board opened in one you have marked as work records work time.
 **Show this week's board** in the menu runs the same command, so the page is one
 click away without a terminal.
 
+A board left open keeps up with the day. The page asks the browser to read it
+again every five minutes, and Hammerspoon rewrites it on the same interval from
+the first board of the session onwards, so a tab on the second monitor is never
+more than five minutes behind
+([ADR 0015](docs/adr/0015-the-open-board-redraws-itself.md)). It stays a page
+with no script in it: the reload is one `<meta>` and it re-reads a file. Only the
+live board does this. `--one-week` and `--out` write a week as it was, for
+somebody else, and a copy that reloaded would go blank the moment the file behind
+it moved on.
+
 ## Install
 
 Hammerspoon has to be running, with `hs.ipc` loaded for the command line.
