@@ -1158,13 +1158,6 @@ class Board(unittest.TestCase):
                 self.assertEqual(zyt.main(["board", "2026-09-14", "--no-open"]), 0)
                 self.assertEqual(asked, ['if _G.zyt then _G.zyt:keepBoardFresh("2026-09-14") end'])
 
-                # a date the command line takes but this does not recognise is
-                # not sent: redrawing this week over a day board would be worse
-                asked.clear()
-                self.assertEqual(zyt.main(["board", "20260914", "--no-open"]), 0)
-                self.assertIn("Monday 14.09.2026", (zyt.STATE / "board.html").read_text())
-                self.assertEqual(asked, [])
-
                 # a snapshot over the live file gets neither half, and takes the
                 # timer down with it rather than being replaced by this week
                 asked.clear()
@@ -1194,6 +1187,16 @@ class Board(unittest.TestCase):
             finally:
                 zyt.sys.stdout, zyt.hs_call = out, called
                 zyt.STATE, zyt.CONFIG = state, config
+
+    def test_only_a_period_that_looks_like_one_is_sent_to_the_spoon(self):
+        self.assertEqual(zyt.asked_period(None), "")  # this week
+        self.assertEqual(zyt.asked_period("2026-W38"), "2026-W38")
+        self.assertEqual(zyt.asked_period("2026-w38"), "2026-w38")
+        self.assertEqual(zyt.asked_period("2026-09-14"), "2026-09-14")
+        # a day the command line takes on a newer Python than the Mac's, and a
+        # string that would otherwise go into the Lua as it stands
+        self.assertIsNone(zyt.asked_period("20260914"))
+        self.assertIsNone(zyt.asked_period('") os.execute("say no") --'))
 
     def test_the_board_is_renamed_into_place_rather_than_written_open(self):
         with tempfile.TemporaryDirectory() as tmp:
