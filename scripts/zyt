@@ -1391,9 +1391,13 @@ def cmd_board(args) -> int:
         # command: it is waiting for this process to finish, so an ipc call back
         # into it would sit there until the timeout and answer nothing.
         if live:
-            # Quoted into Lua, so only a period that parsed as one goes through.
-            asked = args.when if args.when and re.fullmatch(r"\d{4}-(?:[Ww]\d{2}|\d{2}-\d{2})", args.when) else ""
-            hs_call(f'if _G.zyt then _G.zyt:keepBoardFresh("{asked}") end')
+            # The period is quoted into Lua, so one that does not look like a
+            # period is not sent at all: `fromisoformat` takes `20260914` as
+            # well, and redrawing the wrong week beats not redrawing at all only
+            # in the sense that something happened.
+            asked = args.when or ""
+            if not asked or re.fullmatch(r"\d{4}-(?:[Ww]\d{2}|\d{2}-\d{2})", asked):
+                hs_call(f'if _G.zyt then _G.zyt:keepBoardFresh("{asked}") end')
         else:
             hs_call("if _G.zyt then _G.zyt:stopBoardRefresh() end")
     if not args.no_open:
