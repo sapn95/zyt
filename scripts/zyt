@@ -348,12 +348,17 @@ def summarise(day_segments: list) -> dict:
     # arrives as work and as private at once. Work is what is left of it: the
     # booking proposal is built from this figure, and the one rule it has to
     # keep is that nothing private is in it.
-    at_work = without(spans(work), spans(private))
     private_spans = spans(private)
+    at_work = without(spans(work), private_spans)
+    # What the calendar accounted for, with the same private minutes taken out
+    # of it, so that it stays a part of the work figure rather than a second
+    # figure that can be larger than the one it is inside.
+    from_calendar = without(spans([s for s in day_segments if s.source == MEETING]), private_spans)
     return {
         "start": at_work[0][0] if at_work else None,
         "end": at_work[-1][1] if at_work else None,
         "work": seconds(at_work),
+        "meeting": seconds(from_calendar),
         "private": covered(private),
         # Minutes from midnight, because that is what the proposal works in.
         "privateAt": [minute_span(start, end) for start, end in private_spans],
@@ -799,6 +804,9 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
                 "start": summary["start"].isoformat() if summary["start"] else None,
                 "end": summary["end"].isoformat() if summary["end"] else None,
                 "work": summary["work"],
+                # Part of `work`, not beside it: the hours of it the calendar
+                # accounted for, private minutes already out of both.
+                "meeting": summary["meeting"],
                 "private": summary["private"],
                 "break": summary["break"],
                 "booking": [[clock(s), clock(e)] for s, e in blocks.get(day, [])],
@@ -1055,11 +1063,12 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         for hour in range(first, last + 1, step)
     )
     rows = [f'<div class="row axis"><div></div><div class="track">{ticks}</div><div></div></div>']
-    work = private = filled = 0
+    work = private = meeting = filled = 0
     for day in sorted(days):
         summary = days[day]
         work += summary["work"] // 60
         private += summary["private"] // 60
+        meeting += summary["meeting"] // 60
         drawn = joined(segments.get(day, []))
         recorded = [(*span_of(segment), segment.kind, said(segment)) for segment in drawn if segment.kind != MEETING]
         met = [(*span_of(segment), MEETING, said(segment)) for segment in drawn if segment.kind == MEETING]
@@ -1104,10 +1113,18 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
             f'<div class="lane">{bars(proposed, first, total)}</div></div>'
             f'<div class="figures">{figures}<span class="booking">{html.escape(booking)}</span></div></div>'
         )
+    # Everything recorded first, then how it breaks down. The total is work plus
+    # private because a private minute is not a work minute (ADR 0014), so the
+    # two do not overlap. The calendar figure is part of the work one and not
+    # added to anything: it says how much of the work came from the diary rather
+    # than from the keyboard. Work and what would be booked stand together,
+    # because the pair is the thing worth reading: equal means the proposal
+    # carries the week, and a gap is what `left over` is counting.
     totals = [
-        (fmt_m(work), "recorded work"),
-        (fmt_m(private), "private"),
-        (fmt_m(filled), "booked, work only"),
+        (fmt_m(work + private), "recorded total"),
+        (fmt_m(meeting), "recorded by calendar"),
+        (f"{fmt_m(work)} / {fmt_m(filled)}", "recorded work / booked"),
+        (fmt_m(private), "recorded private"),
     ]
     if leftover is not None:
         totals.append((fmt_m(leftover), "left over"))
