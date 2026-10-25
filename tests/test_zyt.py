@@ -1158,6 +1158,13 @@ class Board(unittest.TestCase):
                 self.assertEqual(zyt.main(["board", "2026-09-14", "--no-open"]), 0)
                 self.assertEqual(asked, ['if _G.zyt then _G.zyt:keepBoardFresh("2026-09-14") end'])
 
+                # a date the command line takes but this does not recognise is
+                # not sent: redrawing this week over a day board would be worse
+                asked.clear()
+                self.assertEqual(zyt.main(["board", "20260914", "--no-open"]), 0)
+                self.assertIn("Monday 14.09.2026", (zyt.STATE / "board.html").read_text())
+                self.assertEqual(asked, [])
+
                 # a snapshot over the live file gets neither half, and takes the
                 # timer down with it rather than being replaced by this week
                 asked.clear()
