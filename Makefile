@@ -24,6 +24,7 @@ test:
 	luacov
 	lua scripts/coverage-floor.lua
 	python3 -m unittest discover -s tests
+	bats spec/*.bats
 
 # Rewrites the files rather than checking them. Never run in CI.
 format:

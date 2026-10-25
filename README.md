@@ -300,10 +300,15 @@ lists every key), then:
 ```
 
 Or through Homebrew, which puts `zyt` on the PATH:
-`brew tap sapn95/zyt https://github.com/sapn95/zyt.git && brew install --HEAD sapn95/zyt/zyt`,
-then `zyt link` as above. While the repository is private the tap URL and the
-formula's `head` are the SSH form, `ssh://git@github.com/sapn95/zyt.git`, and
-the install needs a GitHub SSH key.
+
+```sh
+brew install sapn95/tap/zyt
+zyt link                              # then add the init.lua line it prints
+```
+
+The formula lives in [sapn95/homebrew-tap](https://github.com/sapn95/homebrew-tap)
+and installs the newest release. `brew install --HEAD sapn95/tap/zyt` takes
+`main` instead.
 
 Window titles need Hammerspoon to have Accessibility permission; the doctor
 says whether it does.
@@ -334,15 +339,44 @@ you do leaves the machine. The one thing that goes out is the calendar request,
 when the `meetings` block is on: it asks Microsoft Graph for the times of your
 own events and gets times back.
 
+## Employer-neutral on purpose
+
+The rules that make this useful are the ones that name things: the employer's
+git host, the applications used at work, the words in a browser title that mean
+an internal system. None of them belong in here. They live in
+`~/.config/zyt/rules.json`, which is not in git and never will be
+([ADR 0008](docs/adr/0008-the-rules-stay-out-of-the-repository.md)), and
+`examples/rules.json` keeps the shape with invented names in it: write the rule,
+not the example. The record of what you did is the same story. It stays in
+`~/.local/state/zyt/`, and nothing in this repository has ever held a row of it.
+
+Half of that is enforced. `scripts/leak-lint.sh` runs in CI and in `make lint`
+and fails on any IPv4 address in the tree that is not from a documentation
+range. Private space is refused too, which is the lesson from sapn95/vpnbar: it
+ran the same check with private ranges allowed as a class, and two live
+addresses out of a 10.x network went past it into a public history. Files nobody
+has added yet are searched as well, so a new one is caught before it is
+committed, and a run that could not look fails instead of reporting a clean
+tree — if git will not list the files, or grep cannot read one of them, the lint
+stops there. An **allowlist**, so it contains nothing worth hiding and fails
+closed; the reasoning is
+[container-commander's ADR 0011](https://github.com/sapn95/container-commander/blob/main/docs/adr/0011-employer-neutral-public-repo.md).
+
+The other half cannot easily be: a git host or an application named after an
+employer looks like any other word. That one is checked by reading. The one
+place a key of that shape had got in was a window-title fixture in
+`spec/classify_spec.lua`, and it was taken out before this repository became
+public.
+
 ## Development
 
 ```sh
-make check        # stylua, ruff, luacheck, shellcheck, the leak lint, busted with a coverage floor, unittest
+make check        # stylua, ruff, luacheck, shellcheck, the leak lint, busted with a coverage floor, unittest, bats
 make format       # rewrites; never in CI
 ```
 
-`busted`, `luacheck` and `luacov` come from luarocks, `stylua` and
-`shellcheck` from Homebrew, `ruff` from pipx or a venv. The Lua core is tested
+`busted`, `luacheck` and `luacov` come from luarocks, `stylua`, `shellcheck`
+and `bats-core` from Homebrew, `ruff` from pipx or a venv. The Lua core is tested
 without Hammerspoon ([ADR 0001](docs/adr/0001-a-pure-core-and-a-thin-shell.md));
 the command line on the `python3` a Mac ships with.
 
