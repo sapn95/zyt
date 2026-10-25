@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Every IPv4 address written down in this repository has to come from a range
-# reserved for documentation. Nothing else may be here.
+# reserved for documentation, or be a loopback address. Nothing else may be
+# here.
 #
 # "Documentation or private" was the rule until 2026-10-25, and private space
 # was too wide to mean anything: an address an employer's network hands out is
@@ -22,11 +23,14 @@
 # and checked by reading. This catches the class a machine can catch.
 set -euo pipefail
 
-# Documentation space (RFC 5737), the addresses that mean nothing on their own,
-# loopback, link-local and multicast. A netmask is written like an address and
-# is not one: anything in 255/8 is reserved and cannot be a host anywhere, so
-# it cannot be one of his.
-readonly ALLOWED='^(0\.0\.0\.0$|127\.|169\.254\.|255\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|22[4-9]\.|23[0-9]\.)'
+# Documentation space (RFC 5737), and loopback as the one exception: 127.0.0.1
+# is in here because the sign-in server binds it, and loopback is this machine
+# whatever machine that is, so it names nobody. Link-local, broadcast and
+# multicast were allowed too and are not any more: 239.x is organization-local
+# multicast, which is a group address a real network really does hand out, and
+# an exception nothing in the tree needs is an exception that only ever lets
+# something through.
+readonly ALLOWED='^(127\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)'
 readonly PATTERN='[0-9]{1,3}(\.[0-9]{1,3}){3}'
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -92,7 +96,7 @@ while IFS= read -r -d '' file && IFS= read -r -d '' hit; do
   address="${hit#*:}"
   [ -n "${address}" ] || continue
   if ! printf '%s' "${address}" | grep -qE "${ALLOWED}"; then
-    printf '%s:%s: %s is not a documentation address\n' "${file}" "${line}" "${address}" >&2
+    printf '%s:%s: %s is neither a documentation address nor loopback\n' "${file}" "${line}" "${address}" >&2
     found=1
   fi
 done < "${matches}"
@@ -103,4 +107,4 @@ if [ "${found}" -ne 0 ]; then
   echo "A private address is not safe by being private: a real one looks the same." >&2
   exit 1
 fi
-echo "every address written down here is a documentation one"
+echo "every address written down here is a documentation one or loopback"

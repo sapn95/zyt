@@ -37,17 +37,18 @@ teardown() {
   rm -rf "${TMP}"
 }
 
-@test "passes when every address is a documentation one" {
+@test "passes when every address is a documentation one, or loopback" {
+  printf 'the sign-in server binds 127.0.0.1\n' > loopback.md
   run "${SCRIPT}"
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"every address written down here is a documentation one"* ]]
+  [[ "${output}" == *"every address written down here is a documentation one or loopback"* ]]
 }
 
 @test "objects to a private address, which is nothing this repository invents" {
   printf 'the proxy is %s\n' "${INTERNAL}" > proxy.md
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"proxy.md:1: ${INTERNAL} is not a documentation address"* ]]
+  [[ "${output}" == *"proxy.md:1: ${INTERNAL} is neither a documentation address nor loopback"* ]]
   [[ "${output}" == *"not safe by being private"* ]]
 }
 
@@ -56,7 +57,7 @@ teardown() {
   git add leaky.md
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"leaky.md:2: ${LEAKED} is not a documentation address"* ]]
+  [[ "${output}" == *"leaky.md:2: ${LEAKED} is neither a documentation address nor loopback"* ]]
   [[ "${output}" == *"192.0.2.x"* ]]
 }
 
@@ -64,7 +65,7 @@ teardown() {
   printf 'the resolver is %s\n' "${LEAKED}" > leaky.md
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"${LEAKED} is not a documentation address"* ]]
+  [[ "${output}" == *"${LEAKED} is neither a documentation address nor loopback"* ]]
 }
 
 @test "reads what is staged when the working copy is gone" {
@@ -73,7 +74,7 @@ teardown() {
   rm staged.md
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"staged.md:1: ${LEAKED} is not a documentation address"* ]]
+  [[ "${output}" == *"staged.md:1: ${LEAKED} is neither a documentation address nor loopback"* ]]
 }
 
 @test "looks inside a file that has a NUL byte in it" {
@@ -84,7 +85,7 @@ teardown() {
   git add binary.md
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"${LEAKED} is not a documentation address"* ]]
+  [[ "${output}" == *"${LEAKED} is neither a documentation address nor loopback"* ]]
 }
 
 @test "a file name with a tab and a colon in it cannot hide an address" {
@@ -96,7 +97,7 @@ teardown() {
   printf 'the resolver is %s\n' "${LEAKED}" > "${odd}"
   run "${SCRIPT}"
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *"${LEAKED} is not a documentation address"* ]]
+  [[ "${output}" == *"${LEAKED} is neither a documentation address nor loopback"* ]]
 }
 
 @test "leaves the files git is told to ignore alone" {
@@ -104,6 +105,19 @@ teardown() {
   printf 'the resolver is %s\n' "${LEAKED}" > notes.md
   run "${SCRIPT}"
   [ "${status}" -eq 0 ]
+}
+
+@test "objects to a link-local address, which used to be allowed as a class" {
+  # 169.254.x and 239.x passed the lint until 2026-10-25. Organization-local
+  # multicast is a group address a real network hands out, and neither class
+  # is anything the fixtures here need.
+  local_link="$(printf '169.254.%s.%s' 12 9)"
+  group="$(printf '239.%s.%s.%s' 1 2 3)"
+  printf 'it answered on %s and the group was %s\n' "${local_link}" "${group}" > stale.md
+  run "${SCRIPT}"
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"stale.md:1: ${local_link} is neither"* ]]
+  [[ "${output}" == *"stale.md:1: ${group} is neither"* ]]
 }
 
 @test "fails when git cannot say what the files are" {
