@@ -1158,6 +1158,53 @@ class Board(unittest.TestCase):
             ],
         )
 
+    def test_the_board_cannot_be_read_as_private_time_handed_over(self):
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["private"] = 10 * 60
+        days[monday]["privateAt"] = [private_from(9 * 60, 9 * 60 + 10)]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        drawn = zyt.board_week(days, {}, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w")
+        page = zyt.render_board([drawn], "Week 2026-W38")
+        self.assertIn("<b>8h00</b>work", page)  # the hours are work and say so
+        self.assertIn("0h10 private, not booked", page)  # where the figure stands, not in the key
+        self.assertIn("0h10 of it drawn under a block", page)  # drawn there, not booked there
+        self.assertIn("A block says where the hours are entered, not when they happened.", page)
+        # On the proposal lane the stretch is a hole in the block, not a bar in it.
+        self.assertIn('class="cut"', page)
+        self.assertNotIn('<span class="private"', page)
+        self.assertIn("private, cut out of the booking", page)  # and the key says so
+        # Each figure on a line of its own: side by side they read as one claim.
+        self.assertIn(".figures span { display: block;", page)
+
+    def test_the_note_names_the_sliver_only_when_there_is_one(self):
+        report = {**REPORT, "earliest": "08:00", "latest": "20:00"}
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["private"] = 60 * 60
+        days[monday]["privateAt"] = [private_from(13 * 60, 14 * 60)]
+        blocks, booked, leftover = zyt.propose(days, report)
+        page = zyt.board_week(days, {}, blocks, booked, leftover, report, "Week 2026-W38", "14.09. to 20.09.", "w")
+        self.assertIn("None of the private time is in them.</p>", page)
+        self.assertNotIn("drawn under a block", page)
+
+    def test_a_few_private_seconds_do_not_print_as_none(self):
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["private"] = 5
+        days[monday]["privateAt"] = [{"from": 540, "to": 541, "first": 9 * 3600 + 30, "last": 9 * 3600 + 35}]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        page = zyt.board_week(days, {}, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w")
+        self.assertIn("under a minute private, not booked", page)
+        self.assertNotIn("0h00 private", page)
+
+    def test_a_week_with_nothing_private_says_nothing_about_it(self):
+        days = week(mon=480)
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        page = zyt.board_week(days, {}, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w")
+        self.assertNotIn("A block says where", page)
+        self.assertNotIn("drawn under a block", page)
+
     def test_the_live_board_reloads_itself_and_a_copy_does_not(self):
         drawn = zyt.board_week(
             week(mon=480), {dt.date(2026, 9, 14): []}, {}, {}, None, REPORT, "Week 2026-W38", "14.09.", "w"

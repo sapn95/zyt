@@ -102,12 +102,26 @@ at all. The figures beside it say what counts.
 is booked" is a claim about an arithmetic nobody can see, and the first
 question it got was whether it was true. So `private_under` adds up the
 private time each day's blocks were drawn across; the report prints it under
-the totals, the board paints those minutes purple on the booking lane and
-names the amount beside the day, and `--json` carries it as
-`privateUnderBooking`. Measured on this machine with the code this decision
+the totals, the board outlines those minutes on the booking lane and names the
+amount beside the day, and `--json` carries it as `privateUnderBooking`. Measured on this machine with the code this decision
 describes: 0h58 in 2026-W41, 0h59 in W40, 2h19 in W39, against weeks of about
 fifty hours. A figure that can be checked is worth more than one that has to
 be believed.
+
+**Counted out loud, and said out loud too.** The first reading of the board
+was that private time was being handed to an employer, and every part of the
+drawing invited it: a solid purple bar inside a blue block, the day's figures
+run together into `0h11 private0h06 under a block, unbooked`, and nowhere a
+sentence saying what a block is. None of it was wrong and all of it was
+unreadable. So the stretch on the booking lane is now a hole in the block
+rather than a bar inside it, each figure stands on a line of its own and names
+itself, and the week carries one sentence under the chart: a block says where
+the hours are entered, not when they happened, and none of the private time is
+in them. The second part is arithmetic. The first is the thing a reader cannot
+derive from the picture, because the proposal moves a day's hours into the
+window and lays them out in even stretches, so a block can stand over an hour
+that was spent somewhere else entirely. The arithmetic did not change; only
+what the page says about it.
 
 It measures what the blocks stand over, and it is not handed the stretches the
 layout kept out. The two agree today, because a block is never laid over a

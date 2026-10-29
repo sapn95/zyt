@@ -923,10 +923,14 @@ h1 { margin: 0; font-size: 1.5rem; font-weight: 640; letter-spacing: -0.015em; }
 .private { background: var(--private); }
 .meeting { background: var(--meeting); }
 .book { background: var(--soft); box-shadow: inset 0 0 0 1px var(--outline); }
+.cut { background: var(--card); box-shadow: inset 0 0 0 1px var(--private); }
 .figures { font-size: 0.78rem; color: var(--dim); }
 .figures b { margin-right: 0.35rem; color: var(--ink); font-size: 0.95rem; font-weight: 600; }
-.booking { display: block; margin-top: 0.1rem; }
+/* One figure to a line. Side by side they run together, and `0h11 private`
+   next to `0h06 under a block` reads as one claim about the booking. */
+.figures span { display: block; margin-top: 0.1rem; }
 .under { color: var(--private); }
+.note { margin: 0.7rem 0 0; color: var(--dim); font-size: 0.74rem; }
 footer {
   display: flex;
   flex-wrap: wrap;
@@ -1063,7 +1067,7 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         for hour in range(first, last + 1, step)
     )
     rows = [f'<div class="row axis"><div></div><div class="track">{ticks}</div><div></div></div>']
-    work = private = meeting = filled = 0
+    work = private = meeting = filled = under_week = 0
     for day in sorted(days):
         summary = days[day]
         work += summary["work"] // 60
@@ -1091,16 +1095,32 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
                     (
                         max(stretch["from"], start),
                         min(stretch["to"], end),
-                        "private",
+                        # `cut`, not `private`: on the proposal lane a solid
+                        # magenta bar inside a blue block reads as private time
+                        # sitting in the booking, which is the opposite of what
+                        # it marks. Drawn as a hole in the block it reads as
+                        # what it is, time the booking does not cover.
+                        "cut",
                         f"private {second(held[0])} to {second(held[1])}, not booked",
                     )
                 )
         under = private_under(summary, blocks.get(day, []))
-        figures = f"<b>{fmt_h(summary['work'])}</b>"
+        under_week += under
+        # Every figure says what it is, on a line of its own. The hours are
+        # work and nothing else; the private time carries `not booked` where it
+        # stands rather than leaving the reader to find it in the key; and the
+        # sliver under a block is said to be drawn there, because that is what
+        # it is. Run together on one line the three read as one claim about the
+        # booking, which is how `0h11 private0h06 under a block, unbooked` came
+        # to look like private time handed to an employer.
+        figures = f"<b>{fmt_h(summary['work'])}</b>work"
         if summary["private"]:
-            figures += f"<span>{fmt_h(summary['private'])} private</span>"
+            # `fmt_small`, so that a day whose private time is a handful of
+            # seconds does not read `0h00 private` over a line saying some of
+            # it is under a block.
+            figures += f"<span>{fmt_small(summary['private'])} private, not booked</span>"
         if under:
-            figures += f'<span class="under">{fmt_small(under)} under a block, unbooked</span>'
+            figures += f'<span class="under">{fmt_small(under)} of it drawn under a block</span>'
         if day in blocks:
             filled += booked[day]
             booking = " · ".join(f"{clock(start)}–{clock(end)}" for start, end in blocks[day]) or "nothing to book"
@@ -1128,6 +1148,20 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
     ]
     if leftover is not None:
         totals.append((fmt_m(leftover), "left over"))
+    # A block is a place to enter hours, not a record of when they happened:
+    # the proposal moves a day's work into the window and lays it out in even
+    # stretches, so a block can stand over an hour that was spent elsewhere and
+    # over a glance at a private chat. Nothing private is in the hours
+    # themselves (ADR 0014). Drawn without that sentence, a magenta sliver
+    # inside a blue block reads as private time handed to the employer, which
+    # is the one thing this program exists to make impossible.
+    note = ""
+    if private:
+        note = (
+            '<p class="note">A block says where the hours are entered, not when they happened. '
+            "None of the private time is in them"
+        )
+        note += f", though {fmt_small(under_week)} of it is drawn under a block.</p>" if under_week else ".</p>"
     return (
         f'<section class="week{" current" if current else ""}" id="{ident}">{nav}'
         f"<h1>{html.escape(heading)}</h1>"
@@ -1137,7 +1171,9 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
         + "</ul>"
         + f'<section class="chart" style="--hour:{100 / (last - first):.4f}%">'
         + "".join(rows)
-        + "</section></section>"
+        + "</section>"
+        + note
+        + "</section>"
     )
 
 
@@ -1155,6 +1191,7 @@ def render_board(weeks: list, title: str, refresh: int = 0) -> str:
         (MEETING, "in a meeting"),
         ("private", "private, never booked"),
         ("book", "proposed booking"),
+        ("cut", "private, cut out of the booking"),
     ]
     source = str(STATE / "intervals.csv").replace(str(HOME), "~", 1)
     made = f"written {dt.datetime.now():%d.%m.%Y %H:%M} from {source} · one file, no script, nothing fetched"
