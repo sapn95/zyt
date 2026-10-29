@@ -235,9 +235,13 @@ none of the private time is booked; 0h58 of it is under a block, in stretches
 too short to be laid round
 ```
 
-The board draws the same thing: the stretches are painted purple on the
-booking lane where a block was drawn across them, each one labelled with the
-seconds it really lasted, the day's figures name the amount, and `--json`
+The board draws the same thing. On the booking lane such a stretch is a hole
+in the block rather than a bar inside it, outlined in purple and labelled with
+the seconds it really lasted, because a solid bar inside a block is read as
+private time sitting in the booking, which is the opposite of what it marks.
+Under the chart the week says the rest in one sentence: a block says where the
+hours are entered, not when they happened, and none of the private time is in
+them. The day's figures name the amount on a line of their own, and `--json`
 carries it per day as `privateUnderBooking`.
 
 ## The board
@@ -267,8 +271,8 @@ not a work minute ([ADR 0014](docs/adr/0014-a-private-minute-is-not-a-work-minut
 
 ```text
             07   08   09   10   11   12   13   14   15   16   17   18
-Mon 14.09.       ████████████████████▓▓▓▓ ███████████████████     7h50 · 0h45 private
-                           ▓▓▓▓▓▓▓▓▓▓                             (in a meeting)
+Mon 14.09.       ████████████████████▓▓▓▓ ███████████████████     7h50 work
+                           ▓▓▓▓▓▓▓▓▓▓                             0h45 private, not booked
                  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒▒▒▒       08:00–13:00 · 13:30–16:20
 ```
 
