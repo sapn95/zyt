@@ -1156,7 +1156,10 @@ def board_week(days, segments, blocks, booked, leftover, report, heading, sub, i
     # inside a blue block reads as private time handed to the employer, which
     # is the one thing this program exists to make impossible.
     note = ""
-    if private:
+    # The week's `private` is whole minutes, so a week of nothing but slivers
+    # rounds it to zero while the day rows still say `under a minute private`.
+    # The seconds decide, the same ones the rows are drawn from.
+    if any(summary["private"] for summary in days.values()):
         note = (
             '<p class="note">A block says where the hours are entered, not when they happened. '
             "None of the private time is in them"
