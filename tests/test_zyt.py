@@ -1198,6 +1198,17 @@ class Board(unittest.TestCase):
         self.assertIn("under a minute private, not booked", page)
         self.assertNotIn("0h00 private", page)
 
+    def test_a_week_of_slivers_still_carries_the_sentence(self):
+        # the week's private minutes round to zero, the day's seconds do not
+        days = week(mon=480)
+        monday = dt.date(2026, 9, 14)
+        days[monday]["private"] = 5
+        days[monday]["privateAt"] = [{"from": 540, "to": 541, "first": 9 * 3600 + 30, "last": 9 * 3600 + 35}]
+        blocks, booked, leftover = zyt.propose(days, REPORT)
+        page = zyt.board_week(days, {}, blocks, booked, leftover, REPORT, "Week 2026-W38", "14.09. to 20.09.", "w")
+        self.assertIn("<b>0h00</b>recorded private", page)  # the totals do round it away
+        self.assertIn("A block says where the hours are entered", page)
+
     def test_a_week_with_nothing_private_says_nothing_about_it(self):
         days = week(mon=480)
         blocks, booked, leftover = zyt.propose(days, REPORT)
