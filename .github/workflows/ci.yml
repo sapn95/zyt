@@ -65,7 +65,11 @@ jobs:
 
   test:
     name: unit tests
-    runs-on: ubuntu-latest
+    # Pinned, because `ubuntu-latest` became 26.04 and actions/python-versions
+    # builds no 3.9 for it: `The version '3.9' with architecture 'x64' was not
+    # found for Ubuntu 26.04`. 3.9 is the point of this job, so the runner is
+    # what gives way. 24.04 carries 3.9.25.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
