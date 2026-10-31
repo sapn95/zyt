@@ -1,0 +1,67 @@
+name: release
+
+# A tag is the whole trigger, and the tag's own message is the release notes:
+# the reason to upgrade is worth a sentence written by hand, which a list of
+# commit subjects is not. There is deliberately no manual dispatch, because
+# every job here needs a tag to mean anything.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two tags pushed together would both publish, and the tap would then fetch
+  # whichever of them GitHub happens to call the latest release.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tag message and `origin/main` are both needed below.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: the tag, scripts/zyt and the Spoon must agree
+        # Homebrew installs the command and the Spoon together out of one
+        # tarball, so a release where the two disagree ships a version number
+        # that is wrong wherever it is read.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          command=$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' scripts/zyt)
+          spoon=$(sed -n 's/^obj.version = "\(.*\)"$/\1/p' Zyt.spoon/init.lua)
+          echo "tag=$tag scripts/zyt=$command Spoon=$spoon"
+          test "$tag" = "$command" || { echo "scripts/zyt says $command, the tag says $tag"; exit 1; }
+          test "$tag" = "$spoon" || { echo "the Spoon says $spoon, the tag says $tag"; exit 1; }
+
+      - name: the tag has to be on main
+        # The required checks run on pull requests and on main. A tag put on a
+        # side branch would publish code none of them ever saw, and the tap
+        # would install it within the hour.
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD FETCH_HEAD ||
+            { echo "${GITHUB_REF_NAME} is not on main"; exit 1; }
+
+      - name: publish
+        # No assets: the formula builds the source tarball GitHub attaches to
+        # every release by itself, and a second copy of the same bytes is one
+        # more thing that can disagree with the checksum in the tap.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > notes.md
+          if [ ! -s notes.md ]; then
+            git log -1 --pretty=%B "${GITHUB_REF_NAME}" > notes.md
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --notes-file notes.md --generate-notes --repo "${GITHUB_REPOSITORY}"

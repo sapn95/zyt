@@ -13,7 +13,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "Zyt"
-obj.version = "0.1.0"
+obj.version = "1.0.0"
 obj.author = "Sebastian Winterberger"
 obj.license = "MIT"
 obj.homepage = "https://github.com/sapn95/zyt"
