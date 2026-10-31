@@ -351,6 +351,7 @@ says whether it does.
 | `zyt context <source> [dir]` | Leave the same note from anything else |
 | `zyt link` · `zyt unlink` | Put the Spoon where Hammerspoon finds it, take it out |
 | `zyt doctor` | Check the installation |
+| `zyt --version` | Which version this is |
 
 ## What is written where
 

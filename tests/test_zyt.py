@@ -1802,5 +1802,22 @@ class Hook(unittest.TestCase):
             zyt.STATE = state
 
 
+class Version(unittest.TestCase):
+    """The command and the Spoon are installed together, so they ship one number."""
+
+    def test_the_spoon_carries_the_same_version(self):
+        init = (Path(__file__).resolve().parent.parent / "Zyt.spoon" / "init.lua").read_text()
+        spoon = re.search(r'^obj\.version = "([^"]+)"$', init, re.M)
+        self.assertIsNotNone(spoon, "Zyt.spoon/init.lua has no obj.version line")
+        self.assertEqual(spoon.group(1), zyt.VERSION)
+
+    def test_the_command_says_which_version_it_is(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
+            zyt.main(["--version"])
+        self.assertEqual(stop.exception.code, 0)
+        self.assertEqual(out.getvalue().strip(), f"zyt {zyt.VERSION}")
+
+
 if __name__ == "__main__":
     unittest.main()

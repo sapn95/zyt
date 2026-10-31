@@ -34,6 +34,10 @@ import zoneinfo
 from dataclasses import dataclass
 from pathlib import Path
 
+# The Spoon carries the same number in Zyt.spoon/init.lua, and the release
+# workflow refuses a tag that disagrees with either of them.
+VERSION = "1.0.0"
+
 HOME = Path.home()
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "zyt" / "rules.json"
 STATE = Path(os.environ.get("XDG_STATE_HOME") or HOME / ".local" / "state") / "zyt"
@@ -2204,6 +2208,7 @@ def cmd_doctor(_args) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="zyt", description=__doc__.split("\n\n")[1])
+    parser.add_argument("--version", action="version", version=f"zyt {VERSION}")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("link", help="symlink the Spoon into ~/.hammerspoon/Spoons").set_defaults(run=cmd_link)
     sub.add_parser("unlink", help="remove that symlink").set_defaults(run=cmd_unlink)
