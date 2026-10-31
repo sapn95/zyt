@@ -1,6 +1,6 @@
 name: release
 
-# A tag is the whole trigger, and the tag's own message is the release notes:
+# A tag is the whole trigger, and the tag's own message leads the release notes:
 # the reason to upgrade is worth a sentence written by hand, which a list of
 # commit subjects is not. There is deliberately no manual dispatch, because
 # every job here needs a tag to mean anything.
@@ -59,9 +59,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # An annotated tag, or there is no handwritten message to publish:
+          # `%(contents)` of a lightweight tag reads the tagged commit's
+          # message, which is written for the diff rather than for somebody
+          # deciding whether to upgrade.
+          test "$(git cat-file -t "${GITHUB_REF_NAME}")" = tag ||
+            { echo "${GITHUB_REF_NAME} is lightweight: annotate it with the notes"; exit 1; }
           git tag -l --format='%(contents)' "${GITHUB_REF_NAME}" > notes.md
-          if [ ! -s notes.md ]; then
-            git log -1 --pretty=%B "${GITHUB_REF_NAME}" > notes.md
-          fi
+          # The tag message first, then the generated list of commits under it:
+          # the paragraph says why to upgrade, the list says what moved.
           gh release create "${GITHUB_REF_NAME}" \
             --notes-file notes.md --generate-notes --repo "${GITHUB_REPOSITORY}"
