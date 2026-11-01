@@ -49,7 +49,7 @@ jobs:
       - uses: leafo/gh-actions-lua@v13.1.0
         with:
           luaVersion: ${{ env.LUA_VERSION }}
-      - uses: leafo/gh-actions-luarocks@v6.1.0
+      - uses: leafo/gh-actions-luarocks@v6.1.1
       - name: luacheck
         run: |
           luarocks install luacheck
@@ -78,7 +78,7 @@ jobs:
       - uses: leafo/gh-actions-lua@v13.1.0
         with:
           luaVersion: ${{ env.LUA_VERSION }}
-      - uses: leafo/gh-actions-luarocks@v6.1.0
+      - uses: leafo/gh-actions-luarocks@v6.1.1
       - name: install busted and luacov
         run: |
           luarocks install busted
@@ -133,7 +133,7 @@ jobs:
       - name: yamllint
         run: pipx run yamllint .
       - name: markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@v24.2.0
+        uses: DavidAnson/markdownlint-cli2-action@v25.0.0
 
   secrets:
     name: secret scan
