@@ -55,7 +55,7 @@ describe("rules.normalise", function()
     assert.is_true(r.meetings.enabled)
     assert.equal(60, r.meetings.minimumSeconds)
     assert.equal("work", r.meetings.class)
-    assert.same({ "busy", "oof", "tentative" }, r.meetings.statuses)
+    assert.same({ "busy", "tentative" }, r.meetings.statuses)
     -- the tenant and the app the command line signs in with are none of the
     -- Spoon's business, and a file that carries them still reads
     assert(rules.normalise({ meetings = { tenantId = "t", clientId = "c" } }, "/h"))

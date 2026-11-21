@@ -140,7 +140,7 @@ consented for you alone:
   "tenantId": "<your tenant>",
   "clientId": "<your app>",
   "class": "work",
-  "statuses": ["busy", "oof", "tentative"],
+  "statuses": ["busy", "tentative"],
   "skipSubjects": ["social event", "team event"],
   "minimumSeconds": 300,
   "lookbackHours": 24
@@ -163,8 +163,26 @@ From then on it keeps itself in line. A meeting is written as the calendar has
 it, the whole of it, whether or not you were at the keyboard through it: both
 are true. Two rows over one hour are one hour, because the totals take the union
 of what is covered rather than the sum. It leaves out what you declined, what
-was cancelled, what says `free` and what lasts the whole day, merges what runs
-back to back, and writes nothing into the hour you are in right now.
+you never answered, what was cancelled, what says `free` and what lasts the
+whole day, merges what runs back to back, and writes nothing into the hour you
+are in right now.
+
+An out-of-office block is time away. A meeting that falls inside one of yours is
+cut out of the record, because you were not in it. Put `oof` into `statuses` if
+your away blocks are work, and then nothing is cut.
+
+An all-day out-of-office entry makes the day a day off. The sync writes those
+days to `days-off.json` in the state directory, and `report.daysOff` adds days by
+hand, for a sick day the calendar does not know about:
+
+```json
+"report": { "daysOff": ["2026-11-19"] }
+```
+
+A day off keeps the work you recorded on it and is given none from the rest of
+the week, so the weekend and the overflow go to the days you were there.
+`zyt week` marks it `(day off)`. The day's absence itself is not booked: that is
+for your time recording to say.
 
 Every `syncHours` it goes over a whole window, `lookbackDays` back and
 `lookaheadDays` forward, and brings the record into line with the calendar:

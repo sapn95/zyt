@@ -10,6 +10,13 @@ local DECLINED = "declined"
 --- What the calendar calls time that is not taken.
 local FREE = "free"
 
+--- What the calendar calls time somebody is away.
+local OOF = "oof"
+
+--- The answer of an invitation nobody has answered. It says nothing about
+--- whether the hour was spent in the room, so it is not taken as a yes.
+local UNANSWERED = "notResponded"
+
 --- The source a row written from the calendar carries.
 M.SOURCE = "meeting"
 local MEETING = M.SOURCE
@@ -38,7 +45,7 @@ function M.counts(settings, event)
   if event.status == FREE then
     return false
   end
-  if event.response == DECLINED then
+  if event.response == DECLINED or event.response == UNANSWERED then
     return false
   end
   for _, status in ipairs(settings.statuses or {}) do
@@ -47,6 +54,63 @@ function M.counts(settings, event)
     end
   end
   return false
+end
+
+local function listed(settings, status)
+  for _, each in ipairs(settings.statuses or {}) do
+    if each == status then
+      return true
+    end
+  end
+  return false
+end
+
+--- The stretches somebody marked themselves away for in the day, an
+--- out-of-office block such as an appointment. A meeting inside one was not
+--- sat through, so its hours are cut out again. Only while the rules leave
+--- `oof` out of `statuses`: a rules file that lists it says that an away block
+--- is work, and then nothing is cut.
+local function away(settings, events)
+  local out = {}
+  if listed(settings, OOF) then
+    return out
+  end
+  for _, event in ipairs(events or {}) do
+    if
+      type(event) == "table"
+      and event.status == OOF
+      and not event.cancelled
+      and not event.allDay
+      and event.response ~= DECLINED
+    then
+      local begins = tonumber(event.start)
+      local ends = tonumber(event.finish or event["end"])
+      if begins and ends and ends > begins then
+        out[#out + 1] = { start = begins, finish = ends }
+      end
+    end
+  end
+  return out
+end
+
+local function cut(pieces, holes)
+  for _, hole in ipairs(holes) do
+    local kept = {}
+    for _, piece in ipairs(pieces) do
+      if hole.finish <= piece.start or hole.start >= piece.finish then
+        kept[#kept + 1] = piece
+      else
+        if piece.start < hole.start then
+          kept[#kept + 1] = { start = piece.start, finish = math.floor(hole.start) }
+        end
+        if hole.finish < piece.finish then
+          kept[#kept + 1] = { start = math.ceil(hole.finish), finish = piece.finish }
+        end
+      end
+    end
+    pieces = kept
+  end
+  return pieces
 end
 
 --- The stretches of `from` to `to` that a meeting covered, in order, merged
@@ -96,6 +160,7 @@ function M.wanted(settings, from, to, events)
       merged[#merged + 1] = { start = piece.start, finish = piece.finish }
     end
   end
+  merged = cut(merged, away(settings, events))
   local out = {}
   local least = tonumber(settings.minimumSeconds) or 0
   for _, piece in ipairs(merged) do
@@ -187,6 +252,64 @@ function M.sync(settings, rows, events, from, to, now)
     return a.start < b.start
   end)
   return add, drop
+end
+
+--- The days an all-day out-of-office entry covers, as `YYYY-MM-DD`, sorted.
+--- Such a day is a day off: the proposal leaves it its own hours and gives it
+--- none from the rest of the week. An all-day event comes back as midnight to
+--- midnight, in UTC or in the zone of its calendar, so each day is read at its
+--- noon, which is the same date either way.
+function M.daysOff(events)
+  local seen, out = {}, {}
+  for _, event in ipairs(events or {}) do
+    if
+      type(event) == "table"
+      and event.allDay
+      and event.status == OOF
+      and not event.cancelled
+      and event.response ~= DECLINED
+    then
+      local begins = tonumber(event.start)
+      local ends = tonumber(event.finish or event["end"])
+      if begins and ends then
+        local at = begins + 43200
+        while at < ends do
+          local day = os.date("!%Y-%m-%d", at)
+          if not seen[day] then
+            seen[day] = true
+            out[#out + 1] = day
+          end
+          at = at + 86400
+        end
+      end
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+--- The days off known before a sync, brought into line with the ones the
+--- calendar gave for the window `from` to `to`: a day inside the window is
+--- whatever the calendar now says, a day outside it is kept as it was.
+function M.mergeDaysOff(known, found, from, to)
+  local first, last = os.date("%Y-%m-%d", from), os.date("%Y-%m-%d", to)
+  local seen, out = {}, {}
+  local function add(day)
+    if type(day) == "string" and day:match("^%d%d%d%d%-%d%d%-%d%d$") and not seen[day] then
+      seen[day] = true
+      out[#out + 1] = day
+    end
+  end
+  for _, day in ipairs(known or {}) do
+    if type(day) == "string" and (day < first or day > last) then
+      add(day)
+    end
+  end
+  for _, day in ipairs(found or {}) do
+    add(day)
+  end
+  table.sort(out)
+  return out
 end
 
 --- The moment a written row says, as seconds.

@@ -21,3 +21,4 @@ their idea was considered or simply missed.
 | [0013](0013-the-calendar-comes-over-graph.md) | The calendar comes over Graph, not out of Outlook |
 | [0014](0014-a-private-minute-is-not-a-work-minute.md) | A private minute is not a work minute |
 | [0015](0015-the-open-board-redraws-itself.md) | The open board redraws itself every five minutes |
+| [0016](0016-time-away-is-not-work.md) | Time away is not work, and a day away is a day off |

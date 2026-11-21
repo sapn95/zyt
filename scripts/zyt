@@ -90,6 +90,11 @@ REPORT_DEFAULTS = {
     # twenty blocks nobody can book. Null keeps every stretch out, however
     # short.
     "skipPrivateMinutes": 30,
+    # Days off by hand, as "YYYY-MM-DD": a day sick or away that the calendar
+    # does not mark. Such a day keeps the work recorded on it and is given none
+    # from the rest of the week. The calendar adds its all-day out-of-office
+    # days to these through the sync (days-off.json in the state directory).
+    "daysOff": [],
 }
 # The calendar half. Times come back from Graph in UTC and are turned into
 # epoch seconds here, so the Spoon parses nothing. The scopes are what a token
@@ -102,7 +107,9 @@ MEETING_DEFAULTS = {
     "class": "work",
     # What an event has to say about the time it takes. `free` never counts, and
     # `workingElsewhere` is a day somewhere else rather than a meeting.
-    "statuses": ["busy", "oof", "tentative"],
+    # Not `oof`: an out-of-office block is time away, and the Spoon cuts a
+    # meeting inside one out of the record rather than counting it.
+    "statuses": ["busy", "tentative"],
     # Subjects that mean the hour is not work: a team event, a drink, whatever
     # is in the diary because people are in the same room rather than because
     # anybody is working. Matched as text inside the subject, case ignored.
@@ -193,6 +200,16 @@ def check_window(path, report: dict) -> None:
         if closes <= opens:
             raise SystemExit(f"{path}: report.latest ({report['latest']}) is not after report.earliest")
     a_clock(path, "report.defaultStart", report.get("defaultStart"))
+    given = report.get("daysOff")
+    if given is None:
+        given = []
+    if not isinstance(given, list):
+        raise SystemExit(f'{path}: report.daysOff has to be a list of dates such as "2026-11-19"')
+    for value in given:
+        try:
+            dt.date.fromisoformat(value if isinstance(value, str) else "")
+        except ValueError:
+            raise SystemExit(f'{path}: report.daysOff holds {value!r}, which is no date such as "2026-11-19"') from None
     lunch = report.get("lunch")
     if lunch is None:
         return
@@ -642,6 +659,24 @@ def layout(start: int, total: int, report: dict, busy: list = ()) -> list:
     return plain
 
 
+def days_off(report: dict, state=None) -> frozenset:
+    """The days off: the ones the rules name and the all-day out-of-office days
+    the Spoon took from the calendar. A file that is missing or cannot be read
+    is no day off, and the week is worked out as before."""
+    days = {dt.date.fromisoformat(value) for value in report.get("daysOff") or []}
+    path = (state or STATE) / "days-off.json"
+    try:
+        written = json.loads(path.read_text()).get("days")
+    except (OSError, ValueError, AttributeError):
+        written = None
+    for value in written if isinstance(written, list) else []:
+        try:
+            days.add(dt.date.fromisoformat(value))
+        except (TypeError, ValueError):
+            continue
+    return frozenset(days)
+
+
 def deal(pool: int, booked: dict, caps: dict, eligible: list) -> int:
     """Hand the pool out to the days with the fewest hours first, a chunk at a
     time, and answer with what found no room."""
@@ -656,7 +691,7 @@ def deal(pool: int, booked: dict, caps: dict, eligible: list) -> int:
     return pool
 
 
-def propose(days: dict, report: dict) -> tuple:
+def propose(days: dict, report: dict, off=frozenset()) -> tuple:
     """Redistribute the week's work onto its workdays.
 
     Every recorded minute is kept and none is invented, and no minute spent
@@ -667,15 +702,21 @@ def propose(days: dict, report: dict) -> tuple:
     the other days, is dealt out to the workdays with the fewest hours first.
     What still finds no room is returned as the leftover, so it is seen rather
     than lost.
+
+    A day in `off` is a day off: it keeps the work recorded on it, up to its
+    capacity, and is given nothing from the other days.
     """
     workdays = [day for day in sorted(days) if day.isoweekday() in report["workdays"]]
     busy = {day: kept_out(days[day], report) for day in workdays}
     caps = {day: capacity(report, busy[day]) for day in workdays}
     recorded = {day: days[day]["work"] // 60 for day in days}
     booked = {day: min(recorded[day], caps[day]) for day in workdays}
+    for day in workdays:
+        if day in off:
+            caps[day] = booked[day]
     pool = sum(recorded[day] for day in days if day not in booked)
     pool += sum(recorded[day] - booked[day] for day in workdays)
-    eligible = [day for day in workdays if recorded[day] > 0 or report["fillEmptyDays"]]
+    eligible = [day for day in workdays if day not in off and (recorded[day] > 0 or report["fillEmptyDays"])]
     pool = deal(pool, booked, caps, eligible)
     # The blocks are what a day is booked as, so the layout has the last word
     # on the figure. A minute it could not stand anywhere goes back into the
@@ -754,18 +795,19 @@ def period(when, single: bool) -> tuple:
     return monday, None
 
 
-def booking_of(day: dt.date, summary: dict, blocks: dict) -> str:
+def booking_of(day: dt.date, summary: dict, blocks: dict, off=frozenset()) -> str:
     if day in blocks:
-        return ", ".join(f"{clock(s)}-{clock(e)}" for s, e in blocks[day]) or "-"
+        text = ", ".join(f"{clock(s)}-{clock(e)}" for s, e in blocks[day]) or "-"
+        return f"{text} (day off)" if day in off else text
     return "moved to the workdays" if summary["work"] else "-"
 
 
-def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftover, title=None) -> str:
+def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftover, title=None, off=frozenset()) -> str:
     """The record on the left, the proposal on the right. Every figure is in
     whole minutes per day, the totals included, so the footer adds up to the
     rows above it. `leftover` is None for a single day: it belongs to the week."""
     sunday = monday + dt.timedelta(days=6)
-    bookings = {day: booking_of(day, days[day], blocks) for day in days}
+    bookings = {day: booking_of(day, days[day], blocks, off) for day in days}
     width = max(len(text) for text in bookings.values()) + 2
     lines = [
         title or f"Week {week_of(monday)}  {monday:%d.%m.} to {sunday:%d.%m.%Y}",
@@ -801,7 +843,7 @@ def render_week(monday: dt.date, days: dict, blocks: dict, booked: dict, leftove
     return "\n".join(lines)
 
 
-def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
+def week_json(days: dict, blocks: dict, booked: dict, leftover: int, off=frozenset()) -> dict:
     return {
         "days": {
             day.isoformat(): {
@@ -819,6 +861,7 @@ def week_json(days: dict, blocks: dict, booked: dict, leftover: int) -> dict:
                 # were drawn across, which is not the same thing and is said so
                 # that it can be checked.
                 "privateUnderBooking": private_under(summary, blocks.get(day, [])),
+                "dayOff": day in off,
             }
             for day, summary in sorted(days.items())
         },
@@ -1356,16 +1399,17 @@ def cmd_report(args) -> int:
     rules = load_rules()
     monday, day = period(args.when, args.command == "day")
     days = week_days(read_intervals(STATE / "intervals.csv"), monday)
-    blocks, booked, leftover = propose(days, rules["report"])
+    off = days_off(rules["report"])
+    blocks, booked, leftover = propose(days, rules["report"], off)
     title = None
     if day:
         days = {day: days[day]}
         leftover = None
         title = f"{day:%A %d.%m.%Y}  (week {week_of(day)})"
     if args.json:
-        print(json.dumps(week_json(days, blocks, booked, leftover), indent=2))
+        print(json.dumps(week_json(days, blocks, booked, leftover, off), indent=2))
     else:
-        print(render_week(monday, days, blocks, booked, leftover, title))
+        print(render_week(monday, days, blocks, booked, leftover, title, off))
     return 0
 
 
@@ -1373,7 +1417,7 @@ def drawn_week(recorded: list, monday: dt.date, report: dict, nav="", current=Fa
     """One week worked out and drawn, from the rows of that week."""
     segments = week_segments(recorded, monday)
     days = {day: summarise(items) for day, items in segments.items()}
-    blocks, booked, leftover = propose(days, report)
+    blocks, booked, leftover = propose(days, report, days_off(report))
     return board_week(
         days,
         segments,
@@ -1394,7 +1438,7 @@ def drawn_day(recorded: list, monday: dt.date, day: dt.date, report: dict) -> st
     a day is something you ask for by name rather than page through."""
     segments = week_segments(recorded, monday)
     days = {each: summarise(items) for each, items in segments.items()}
-    blocks, booked, _ = propose(days, report)
+    blocks, booked, _ = propose(days, report, days_off(report))
     return board_week(
         {day: days[day]},
         {day: segments[day]},

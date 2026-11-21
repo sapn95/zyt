@@ -24,7 +24,9 @@ M.defaults = {
   meetings = {
     enabled = false,
     class = "work",
-    statuses = { "busy", "oof", "tentative" },
+    -- Not `oof`: an out-of-office block is time away, and a meeting inside one
+    -- is cut out of the record rather than counted.
+    statuses = { "busy", "tentative" },
     minimumSeconds = 300,
     lookbackHours = 24,
     -- How far the sync reaches and how often it runs. Forward as well as back,

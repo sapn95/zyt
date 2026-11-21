@@ -28,7 +28,7 @@
     "tenantId": "00000000-0000-0000-0000-000000000000",
     "clientId": "00000000-0000-0000-0000-000000000000",
     "class": "work",
-    "statuses": ["busy", "oof", "tentative"],
+    "statuses": ["busy", "tentative"],
     "skipSubjects": ["social event", "team event"],
     "minimumSeconds": 300,
     "lookbackHours": 24
@@ -40,6 +40,7 @@
     "maxBlockMinutes": 300,
     "breakMinutes": 30,
     "defaultStart": "08:00",
-    "fillEmptyDays": false
+    "fillEmptyDays": false,
+    "daysOff": []
   }
 }
