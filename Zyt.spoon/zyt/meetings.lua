@@ -306,7 +306,7 @@ function M.daysOff(events)
         local begins = tonumber(event.start)
         local ends = tonumber(event.finish or event["end"])
         if begins and ends then
-          local at = begins + 43200
+          local at = math.floor(begins) + 43200
           while at < ends do
             dates[#dates + 1] = os.date("!%Y-%m-%d", at)
             at = at + 86400
@@ -332,7 +332,9 @@ function M.mergeDaysOff(known, found, from, to)
   -- `to` is the first moment after the window, so the last day is the one
   -- the second before it falls on: a window that ends at midnight does not
   -- reach into the next day.
-  local first, last = os.date("%Y-%m-%d", from), os.date("%Y-%m-%d", to - 1)
+  -- Whole seconds: the command line sends the window with a fraction, and
+  -- `os.date` takes integers only.
+  local first, last = os.date("%Y-%m-%d", math.floor(from)), os.date("%Y-%m-%d", math.floor(to) - 1)
   local seen, out = {}, {}
   local function add(day)
     if type(day) == "string" and day:match("^%d%d%d%d%-%d%d%-%d%d$") and not seen[day] then
