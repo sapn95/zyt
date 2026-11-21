@@ -254,11 +254,41 @@ function M.sync(settings, rows, events, from, to, now)
   return add, drop
 end
 
+local function dateParts(text)
+  if type(text) ~= "string" then
+    return nil
+  end
+  local year, month, day = text:match("^(%d%d%d%d)-(%d%d)-(%d%d)$")
+  if not year then
+    return nil
+  end
+  return tonumber(year), tonumber(month), tonumber(day)
+end
+
+--- The dates from `first` up to and not including `last`, both `YYYY-MM-DD`,
+--- counted on the calendar rather than in seconds, so no zone can move them.
+local function datesBetween(first, last)
+  local out = {}
+  local year, month, day = dateParts(first)
+  if not year or not dateParts(last) then
+    return out
+  end
+  local days = daysFromCivil(year, month, day)
+  local y2, m2, d2 = dateParts(last)
+  local stop = daysFromCivil(y2, m2, d2)
+  while days < stop do
+    out[#out + 1] = os.date("!%Y-%m-%d", days * 86400)
+    days = days + 1
+  end
+  return out
+end
+
 --- The days an all-day out-of-office entry covers, as `YYYY-MM-DD`, sorted.
 --- Such a day is a day off: the proposal leaves it its own hours and gives it
---- none from the rest of the week. An all-day event comes back as midnight to
---- midnight, in UTC or in the zone of its calendar, so each day is read at its
---- noon, which is the same date either way.
+--- none from the rest of the week. The command line hands over the calendar
+--- dates as Graph wrote them, and those are used when they are there. Without
+--- them each day is read at the noon of the moment, which gives the same date
+--- for a UTC midnight and for a local one.
 function M.daysOff(events)
   local seen, out = {}, {}
   for _, event in ipairs(events or {}) do
@@ -269,17 +299,24 @@ function M.daysOff(events)
       and not event.cancelled
       and event.response ~= DECLINED
     then
-      local begins = tonumber(event.start)
-      local ends = tonumber(event.finish or event["end"])
-      if begins and ends then
-        local at = begins + 43200
-        while at < ends do
-          local day = os.date("!%Y-%m-%d", at)
-          if not seen[day] then
-            seen[day] = true
-            out[#out + 1] = day
+      local dates = {}
+      if dateParts(event.startDate) and dateParts(event.endDate) then
+        dates = datesBetween(event.startDate, event.endDate)
+      else
+        local begins = tonumber(event.start)
+        local ends = tonumber(event.finish or event["end"])
+        if begins and ends then
+          local at = begins + 43200
+          while at < ends do
+            dates[#dates + 1] = os.date("!%Y-%m-%d", at)
+            at = at + 86400
           end
-          at = at + 86400
+        end
+      end
+      for _, day in ipairs(dates) do
+        if not seen[day] then
+          seen[day] = true
+          out[#out + 1] = day
         end
       end
     end
@@ -292,7 +329,10 @@ end
 --- calendar gave for the window `from` to `to`: a day inside the window is
 --- whatever the calendar now says, a day outside it is kept as it was.
 function M.mergeDaysOff(known, found, from, to)
-  local first, last = os.date("%Y-%m-%d", from), os.date("%Y-%m-%d", to)
+  -- `to` is the first moment after the window, so the last day is the one
+  -- the second before it falls on: a window that ends at midnight does not
+  -- reach into the next day.
+  local first, last = os.date("%Y-%m-%d", from), os.date("%Y-%m-%d", to - 1)
   local seen, out = {}, {}
   local function add(day)
     if type(day) == "string" and day:match("^%d%d%d%d%-%d%d%-%d%d$") and not seen[day] then

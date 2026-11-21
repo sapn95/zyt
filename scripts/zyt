@@ -1990,6 +1990,12 @@ def calendar_view(settings: dict, start: float, end: float, token=None) -> list:
                     "start": _epoch(event.get("start")),
                     "end": _epoch(event.get("end")),
                     "allDay": bool(event.get("isAllDay")),
+                    # The calendar dates of an all-day event as Graph wrote
+                    # them, before any zone is applied: the Spoon reads days
+                    # off from these, and a moment in some other zone can fall
+                    # on the day before.
+                    "startDate": _date_of(event.get("start")) if event.get("isAllDay") else None,
+                    "endDate": _date_of(event.get("end")) if event.get("isAllDay") else None,
                     "cancelled": bool(event.get("isCancelled")),
                     "status": event.get("showAs"),
                     "response": (event.get("responseStatus") or {}).get("response"),
@@ -2015,6 +2021,18 @@ def skipped(settings: dict, subject) -> bool:
     return any(
         isinstance(mark, str) and mark and mark.lower() in lowered for mark in settings.get("skipSubjects") or []
     )
+
+
+def _date_of(stamp):
+    """The date part of a Graph `dateTimeTimeZone`, or None."""
+    if not isinstance(stamp, dict) or not isinstance(stamp.get("dateTime"), str):
+        return None
+    text = stamp["dateTime"][:10]
+    try:
+        dt.date.fromisoformat(text)
+    except ValueError:
+        return None
+    return text
 
 
 def _utc(moment: float) -> str:
