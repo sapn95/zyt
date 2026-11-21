@@ -334,7 +334,7 @@ function M.mergeDaysOff(known, found, from, to)
   -- reach into the next day.
   -- Whole seconds: the command line sends the window with a fraction, and
   -- `os.date` takes integers only.
-  local first, last = os.date("%Y-%m-%d", math.floor(from)), os.date("%Y-%m-%d", math.floor(to) - 1)
+  local first, last = os.date("%Y-%m-%d", math.floor(from)), os.date("%Y-%m-%d", math.ceil(to) - 1)
   local seen, out = {}, {}
   local function add(day)
     if type(day) == "string" and day:match("^%d%d%d%d%-%d%d%-%d%d$") and not seen[day] then
