@@ -124,6 +124,12 @@ describe("meetings.daysOff", function()
     )
     assert.same({ "2026-11-01", "2026-11-06", "2026-11-20" }, out)
     assert.same({ "2026-11-06" }, meetings.mergeDaysOff(nil, { "2026-11-06" }, from, to))
+    -- the window the command line sends carries a fraction of a second
+    assert.same({ "2026-11-06" }, meetings.mergeDaysOff(nil, { "2026-11-06" }, from + 0.25, to + 0.75))
+    assert.same(
+      { "2026-11-06" },
+      meetings.daysOff({ event(FRI + 0.5, FRI + 86400.5, { status = "oof", allDay = true }) })
+    )
     -- a window that ends at midnight leaves the next day as it was
     local midnight = os.time({ year = 2026, month = 11, day = 20, hour = 0 })
     local dayBefore = os.time({ year = 2026, month = 11, day = 19, hour = 0 })
