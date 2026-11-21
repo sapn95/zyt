@@ -614,6 +614,65 @@ class Propose(unittest.TestCase):
         self.assertEqual(sum(booked.values()) + leftover, 463 + 511 + 299 + 612 + 187 + 44)
 
 
+class DaysOff(unittest.TestCase):
+    MONDAY = dt.date(2026, 9, 14)
+
+    def test_a_day_off_keeps_its_own_work_and_takes_none_from_the_week(self):
+        # Friday was a day off with an hour at the keyboard; the weekend goes
+        # to the other days, not onto Friday because it had the fewest hours.
+        days = week(mon=480, tue=480, wed=480, thu=480, fri=60, sat=240)
+        friday = self.MONDAY + dt.timedelta(days=4)
+        blocks, booked, leftover = zyt.propose(days, REPORT, frozenset({friday}))
+        self.assertEqual(booked[friday], 60)
+        self.assertEqual(leftover, 0)
+        self.assertEqual(sum(booked.values()), 4 * 480 + 60 + 240)
+        for day in range(4):
+            self.assertEqual(booked[self.MONDAY + dt.timedelta(days=day)], 480 + 60)
+        # Without the day off Friday is where the weekend would have gone.
+        _, before, _ = zyt.propose(days, REPORT)
+        self.assertEqual(before[friday], 60 + 240)
+
+    def test_a_day_off_with_no_work_stays_empty_even_when_empty_days_are_filled(self):
+        days = week(mon=480, sat=120)
+        tuesday = self.MONDAY + dt.timedelta(days=1)
+        _, booked, leftover = zyt.propose(days, {**REPORT, "fillEmptyDays": True}, frozenset({tuesday}))
+        self.assertEqual(booked[tuesday], 0)
+        self.assertEqual(leftover, 0)
+        self.assertEqual(sum(booked.values()), 600)
+
+    def test_the_days_off_come_from_the_rules_and_the_calendar_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            report = {**REPORT, "daysOff": ["2026-11-19"]}
+            self.assertEqual(zyt.days_off(report, state), frozenset({dt.date(2026, 11, 19)}))
+            (state / "days-off.json").write_text(json.dumps({"days": ["2026-11-06", "nonsense", 7]}))
+            self.assertEqual(zyt.days_off(report, state), frozenset({dt.date(2026, 11, 19), dt.date(2026, 11, 6)}))
+            # A file that is no JSON object is no day off.
+            (state / "days-off.json").write_text("[1, 2]")
+            self.assertEqual(zyt.days_off(report, state), frozenset({dt.date(2026, 11, 19)}))
+            (state / "days-off.json").write_text("{")
+            self.assertEqual(zyt.days_off({**REPORT, "daysOff": []}, state), frozenset())
+
+    def test_days_off_in_the_rules_have_to_be_dates(self):
+        report = dict(zyt.REPORT_DEFAULTS)
+        zyt.check_window("rules.json", {**report, "daysOff": ["2026-11-19"]})
+        zyt.check_window("rules.json", {**report, "daysOff": None})
+        for bad in ("2026-11-19", ["19.11.2026"], [20261119], ["2026-02-30"]):
+            with self.assertRaises(SystemExit):
+                zyt.check_window("rules.json", {**report, "daysOff": bad})
+
+    def test_the_report_says_which_day_is_off(self):
+        days = week(mon=480, fri=60)
+        friday = self.MONDAY + dt.timedelta(days=4)
+        off = frozenset({friday})
+        blocks, booked, leftover = zyt.propose(days, REPORT, off)
+        text = zyt.render_week(self.MONDAY, days, blocks, booked, leftover, off=off)
+        self.assertIn("(day off)", text)
+        as_json = zyt.week_json(days, blocks, booked, leftover, off)
+        self.assertTrue(as_json["days"]["2026-09-18"]["dayOff"])
+        self.assertFalse(as_json["days"]["2026-09-14"]["dayOff"])
+
+
 class Rendering(unittest.TestCase):
     def test_week_parsing_and_naming(self):
         self.assertEqual(zyt.parse_week("2026-W38"), dt.date(2026, 9, 14))
@@ -652,7 +711,7 @@ class Calendar(unittest.TestCase):
             path.write_text(json.dumps({"meetings": {"enabled": True, "class": "private"}}))
             rules = zyt.load_rules(path)
             self.assertEqual(rules["meetings"]["class"], "private")
-            self.assertEqual(rules["meetings"]["statuses"], ["busy", "oof", "tentative"])
+            self.assertEqual(rules["meetings"]["statuses"], ["busy", "tentative"])
             self.assertFalse(zyt.load_rules(Path(tmp) / "none.json")["meetings"]["enabled"])
 
     def test_a_calendar_without_an_app_says_what_is_missing(self):

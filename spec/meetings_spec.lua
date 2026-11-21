@@ -29,6 +29,87 @@ describe("meetings.counts", function()
     -- a status the rules do not name, and no event at all
     assert.is_false(meetings.counts(SETTINGS, event(100, 200, { status = "workingElsewhere" })))
     assert.is_false(meetings.counts(SETTINGS, nil))
+    -- an invitation nobody answered says nothing about the hour
+    assert.is_false(meetings.counts(SETTINGS, event(100, 200, { status = "tentative", response = "notResponded" })))
+    assert.is_true(
+      meetings.counts(SETTINGS, event(100, 200, { status = "tentative", response = "tentativelyAccepted" }))
+    )
+  end)
+end)
+
+describe("meetings.wanted and time away", function()
+  local AWAY = { statuses = { "busy", "tentative" }, minimumSeconds = 300 }
+
+  it("cuts a meeting inside an out-of-office block out again", function()
+    local out = meetings.wanted(AWAY, 0, 20000, {
+      event(1000, 2000),
+      event(3000, 9000, { status = "oof", response = "organizer" }),
+      event(4000, 5000),
+      event(8000, 12000),
+    })
+    assert.same({
+      { start = 1000, finish = 2000, seconds = 1000 },
+      { start = 9000, finish = 12000, seconds = 3000 },
+    }, out)
+  end)
+
+  it("leaves the meetings alone when the rules count an away block as work", function()
+    local out = meetings.wanted(SETTINGS, 0, 20000, {
+      event(3000, 9000, { status = "oof" }),
+      event(4000, 5000),
+    })
+    assert.same({ { start = 3000, finish = 9000, seconds = 6000 } }, out)
+  end)
+
+  it("does not cut for an away block that was called off, declined or all day", function()
+    for _, over in ipairs({
+      { status = "oof", cancelled = true },
+      { status = "oof", response = "declined" },
+      { status = "oof", allDay = true },
+    }) do
+      local out = meetings.wanted(AWAY, 0, 20000, { event(3000, 9000, over), event(4000, 5000) })
+      assert.same({ { start = 4000, finish = 5000, seconds = 1000 } }, out)
+    end
+  end)
+end)
+
+describe("meetings.daysOff", function()
+  -- 2026-11-06 00:00 UTC, and the same date as local midnight in Zurich
+  local FRI = 1793923200
+
+  it("takes every day an all-day out-of-office entry covers", function()
+    local out = meetings.daysOff({
+      event(FRI, FRI + 86400, { status = "oof", allDay = true }),
+      event(FRI + 3 * 86400, FRI + 5 * 86400, { status = "oof", allDay = true }),
+      event(FRI + 3 * 86400 - 3600, FRI + 4 * 86400 - 3600, { status = "oof", allDay = true }),
+    })
+    assert.same({ "2026-11-06", "2026-11-09", "2026-11-10" }, out)
+  end)
+
+  it("leaves out what is no day away", function()
+    assert.same(
+      {},
+      meetings.daysOff({
+        event(FRI, FRI + 86400, { status = "free", allDay = true }),
+        event(FRI, FRI + 86400, { status = "oof" }),
+        event(FRI, FRI + 86400, { status = "oof", allDay = true, cancelled = true }),
+        event(FRI, FRI + 86400, { status = "oof", allDay = true, response = "declined" }),
+        event(FRI, nil, { status = "oof", allDay = true }),
+      })
+    )
+    assert.same({}, meetings.daysOff(nil))
+  end)
+
+  it("brings the known days into line inside the window only", function()
+    local from, to = FRI + 12 * 3600, FRI + 2 * 86400 + 12 * 3600
+    local out = meetings.mergeDaysOff(
+      { "2026-11-01", "2026-11-07", "2026-11-20", "bad" },
+      { "2026-11-06", "2026-11-06" },
+      from,
+      to
+    )
+    assert.same({ "2026-11-01", "2026-11-06", "2026-11-20" }, out)
+    assert.same({ "2026-11-06" }, meetings.mergeDaysOff(nil, { "2026-11-06" }, from, to))
   end)
 end)
 

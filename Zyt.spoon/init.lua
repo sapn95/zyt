@@ -1008,6 +1008,12 @@ function obj:syncMeetings(payload)
     writeAtomically(path, table.concat(kept, "\n") .. "\n")
     self.rows = nil
   end
+  -- The days off travel in a file of their own, because they are no hours:
+  -- the proposal reads them and leaves those days their own work.
+  local known = readJSON(self.statePath .. "/days-off.json")
+  local days =
+    meetings.mergeDaysOff(type(known) == "table" and known.days or {}, meetings.daysOff(body.events or {}), from, to)
+  writeAtomically(self.statePath .. "/days-off.json", hs.json.encode({ days = days }, true))
   local written = 0
   for _, piece in ipairs(add) do
     self:append({
