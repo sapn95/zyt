@@ -653,6 +653,11 @@ class DaysOff(unittest.TestCase):
             (state / "days-off.json").write_text("{")
             self.assertEqual(zyt.days_off({**REPORT, "daysOff": []}, state), frozenset())
 
+    def test_an_all_day_event_carries_its_calendar_dates(self):
+        self.assertEqual(zyt._date_of({"dateTime": "2026-11-19T00:00:00.0000000", "timeZone": "UTC"}), "2026-11-19")
+        self.assertIsNone(zyt._date_of({"dateTime": "soon"}))
+        self.assertIsNone(zyt._date_of(None))
+
     def test_days_off_in_the_rules_have_to_be_dates(self):
         report = dict(zyt.REPORT_DEFAULTS)
         zyt.check_window("rules.json", {**report, "daysOff": ["2026-11-19"]})

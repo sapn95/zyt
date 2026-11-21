@@ -86,6 +86,20 @@ describe("meetings.daysOff", function()
     assert.same({ "2026-11-06", "2026-11-09", "2026-11-10" }, out)
   end)
 
+  it("takes the calendar dates when the command line hands them over", function()
+    -- a calendar at +14:00: the moment is the day before in UTC, the date is not
+    local out = meetings.daysOff({
+      event(FRI - 14 * 3600, FRI + 86400 - 14 * 3600, {
+        status = "oof",
+        allDay = true,
+        startDate = "2026-11-06",
+        endDate = "2026-11-07",
+      }),
+      event(0, 0, { status = "oof", allDay = true, startDate = "2026-12-31", endDate = "2027-01-02" }),
+    })
+    assert.same({ "2026-11-06", "2026-12-31", "2027-01-01" }, out)
+  end)
+
   it("leaves out what is no day away", function()
     assert.same(
       {},
@@ -110,6 +124,10 @@ describe("meetings.daysOff", function()
     )
     assert.same({ "2026-11-01", "2026-11-06", "2026-11-20" }, out)
     assert.same({ "2026-11-06" }, meetings.mergeDaysOff(nil, { "2026-11-06" }, from, to))
+    -- a window that ends at midnight leaves the next day as it was
+    local midnight = os.time({ year = 2026, month = 11, day = 20, hour = 0 })
+    local dayBefore = os.time({ year = 2026, month = 11, day = 19, hour = 0 })
+    assert.same({ "2026-11-20" }, meetings.mergeDaysOff({ "2026-11-20", "2026-11-19" }, {}, dayBefore, midnight))
   end)
 end)
 
